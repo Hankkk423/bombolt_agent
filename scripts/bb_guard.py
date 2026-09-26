@@ -107,9 +107,31 @@ def strip_redirections(tokens: List[str]) -> List[str]:
     return out
 
 
-def split_segments(command: str) -> List[List[str]]:
-    """把一行 shell 切成多段（&& || ; | 換行），每段再 shlex 成 tokens。解析失敗就退回空白切。"""
-    parts = re.split(r"&&|\|\||;|\||\n", command)
+# 一段 shell 的最小單位：引號字串、跳脫字元、分隔符號、其他字。用來在「引號外」切段（見 split_segments 的 quote_aware）
+SHELL_PIECE = re.compile(r"""'[^']*'|"(?:\\.|[^"\\])*"|\\.|&&|\|\||[;|\n]|[^'"\\;|&\n]+|.""", re.S)
+SEPARATORS = ("&&", "||", ";", "|", "\n")
+
+
+def split_outside_quotes(command: str) -> List[str]:
+    """用 && || ; | 換行 切，但引號裡的不算（例如 `grep "a\\|gh b"` 的 pattern）。"""
+    parts, buf = [], ""
+    for piece in SHELL_PIECE.findall(command):
+        if piece in SEPARATORS:
+            parts.append(buf)
+            buf = ""
+        else:
+            buf += piece
+    parts.append(buf)
+    return parts
+
+
+def split_segments(command: str, *, quote_aware: bool = False) -> List[List[str]]:
+    """把一行 shell 切成多段（&& || ; | 換行），每段再 shlex 成 tokens。解析失敗就退回空白切。
+
+    quote_aware=False（B 類規則）：不管引號直接切——寧可誤擋，也要切出 `bash -c "cd x && git push …"` 裡的指令。
+    quote_aware=True（A 類的 gh 檢查）：引號裡的不算，grep 的 pattern 不會被當成 gh 指令。
+    """
+    parts = split_outside_quotes(command) if quote_aware else re.split(r"&&|\|\||;|\||\n", command)
     out = []
     for part in parts:
         part = part.strip()
@@ -236,7 +258,7 @@ def evaluate(payload: Dict[str, Any]) -> Optional[str]:
     # A. 雙帳號保護：任何地方都生效
     if payload.get("tool_name") == "Bash":
         command = (payload.get("tool_input") or {}).get("command", "") or ""
-        if any(os.path.basename(t[0]) == "gh" for t in split_segments(command)):
+        if any(os.path.basename(t[0]) == "gh" for t in split_segments(command, quote_aware=True)):
             wanted = bb_lib.configured_gh_user(cwd)
             if wanted:
                 return (f"這個資料夾用 git config github.user 指定了 GitHub 帳號 `{wanted}`，"

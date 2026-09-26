@@ -236,6 +236,7 @@ class TestGuard(RepoFixture):
             "cd x && git push origin other-branch",
             "git push origin main 2>&1",
             "git push origin > /dev/null main",
+            'bash -c "cd x && git push origin HEAD:main"',  # B 類規則不管引號：藏在引號裡的也擋
         ]
         for c in denied:
             self.assertIsNotNone(self.bash(c), c)
@@ -930,9 +931,14 @@ class TestGhAccount(RepoFixture):
         self.assertIn("bb-gh", bb_guard.evaluate(cmd))
         cmd["tool_input"]["command"] = "cd x && gh issue view 3"
         self.assertIsNotNone(bb_guard.evaluate(cmd))
-        for ok in ("bb-gh pr create --title x", "git log", "echo gh is great"):
+        for ok in ("bb-gh pr create --title x", "git log", "echo gh is great",
+                   r'grep -n "gh auth\|gh 沒" skills/*/SKILL.md', "grep -e 'x|gh pr' notes.md", 'echo "a; gh pr create"'):
             cmd["tool_input"]["command"] = ok
             self.assertIsNone(bb_guard.evaluate(cmd), ok)
+        # 引號外的分隔符號照樣切：真的 gh 指令還是擋
+        for bad in ('echo "a|b" | gh pr create --body-file -', 'grep "x" notes.md; gh pr view', "echo hi\ngh pr view 3"):
+            cmd["tool_input"]["command"] = bad
+            self.assertIsNotNone(bb_guard.evaluate(cmd), bad)
         # bb-gh 也逃不過不可逆操作的禁令（在 bombolt worktree 裡）
         wt = self.create_wt()["path"]
         self.assertIsNotNone(bb_guard.evaluate({"cwd": wt, "tool_name": "Bash",

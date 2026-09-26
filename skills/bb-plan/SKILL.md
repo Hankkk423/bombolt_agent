@@ -69,8 +69,9 @@ $ARGUMENTS
   「修好網路／登入後重試」（建議，重跑 `bb_plan_check.py`）或「先結束這個 session」。
 - ⏭️ 還不能檢查（沒有設定檔）→ 先完成下面的 bb-setup，再重跑 `bb_plan_check.py`，照上面處理。
 
-**C. 其他環境問題**：上面的「現況」有 ❌ 就先處理：
+**C. 其他環境問題**：上面的「現況」有 ❌（或 gh 版本的 ⚠️）就先處理：
   - 沒有 `.claude/bombolt.md` → 告訴使用者需要先設定，然後照 `/bombolt:bb-setup` 的流程完成設定（直接在這個 session 做），再回來繼續。
+  - gh 沒裝或版本太舊 → 請使用者在提示列輸入 `! brew install gh` 或 `! brew upgrade gh`，等他完成。
   - gh 沒登入 → 請使用者在提示列輸入 `! gh auth login`，等他完成。
 - 讀 `.claude/bombolt.md`（在主 checkout），知道這個 repo 的 base branch、閘門、怎麼啟動與登入。
 
