@@ -1,0 +1,10 @@
+{
+  "name": "bombolt",
+  "displayName": "bombolt",
+  "description": "coding agent pipeline：需求 → 規劃成 issue → worktree 自主實作與驗收 → PR → 修改 → 清理",
+  "author": {
+    "name": "Hank Yen"
+  },
+  "repository": "https://github.com/Hankkk423/bombolt_agent",
+  "license": "MIT"
+}

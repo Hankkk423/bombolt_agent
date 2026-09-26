@@ -1,0 +1,26 @@
+#!/usr/bin/env python3
+"""bb-gh：用「這個資料夾指定的 GitHub 帳號」執行 gh。用法跟 gh 完全一樣：`bb-gh pr create ...`
+
+帳號對應寫在 git config（通常放在 includeIf 引入的那份檔案裡）：
+    [github]
+        user = <GitHub 使用者名稱或 email>
+沒設定就跟直接執行 gh 一樣。有設定但 gh 沒登入那個帳號 → 報錯停止，不會退回別的帳號。
+token 只放進這一次執行的環境變數，不切換 gh 的 active 帳號，不影響其他 session。
+"""
+
+import os
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+import bb_lib  # noqa: E402
+
+try:
+    acct = bb_lib.gh_account_env(os.getcwd())
+except bb_lib.GhAccountError as e:
+    print(f"bb-gh: {e}", file=sys.stderr)
+    sys.exit(1)
+
+if os.environ.get("BB_GH_DEBUG"):
+    print(f"bb-gh: 使用帳號 {acct['login'] or '(active)'}（{acct['source']}）", file=sys.stderr)
+os.execve(acct["gh"], [acct["gh"], *sys.argv[1:]], acct["env"])

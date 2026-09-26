@@ -1,0 +1,14 @@
+{
+  "name": "hankkk423",
+  "owner": {
+    "name": "Hank Yen"
+  },
+  "description": "bombolt：Claude Code 的 coding agent pipeline",
+  "plugins": [
+    {
+      "name": "bombolt",
+      "source": "./",
+      "description": "coding agent pipeline：需求 → 規劃成 issue → worktree 自主實作與驗收 → PR → 修改 → 清理"
+    }
+  ]
+}

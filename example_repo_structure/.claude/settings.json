@@ -1,0 +1,6 @@
+{
+  "extraKnownMarketplaces": {
+    "hankkk423": { "source": { "source": "github", "repo": "Hankkk423/bombolt_agent" } }
+  },
+  "enabledPlugins": { "bombolt@hankkk423": true }
+}

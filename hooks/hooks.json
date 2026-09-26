@@ -1,0 +1,17 @@
+{
+  "description": "bombolt 安全守門：只在 bombolt 建的 worktree 裡擋危險動作（見 scripts/bb_guard.py）",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Read|Edit|Write|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/bb_guard.py\"",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}
