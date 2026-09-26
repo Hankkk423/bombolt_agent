@@ -4,6 +4,7 @@ bombolt 是給**所有專案**用的 Claude Code plugin，使用說明見 `READM
 
 - **通用性**：skill、agent、腳本裡不可以出現任何單一專案的東西（路徑、指令、branch 名、公司內部服務）。
   專案專屬的內容一律放在該專案的 `.claude/bombolt.md`。
+  `skills/bb-work/coding-style.md` 是使用者本人的寫法，刻意當成所有專案的預設，不算單一專案的東西。
 - **固定步驟寫成腳本，判斷留給 LLM**：
   - 腳本（`scripts/`）只用 python 標準函式庫，要能在 python 3.9 上跑。
   - 改腳本就要補測試，並跑 `python3 -m unittest discover -s tests`。

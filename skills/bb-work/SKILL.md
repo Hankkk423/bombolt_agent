@@ -24,8 +24,9 @@ disable-model-invocation: true
 - **完成 ＝ issue 的「🏁 完成定義」每一條都有證據地通過**，而且獨立 reviewer 沒有 blocking 問題。
   不是「code 寫完了」，也不是「應該沒問題」。
 - **只做 issue 範圍內的事**。看到別的問題寫進 PR 的 Follow-up，不要順手改。
-- **最小改動、照既有風格**：用最簡單、但能完整達成 issue 的做法。只改需要改的行，
-  不重排、不改名、不動無關的註解或格式；新程式碼照同一個檔案／目錄既有的寫法。issue 寫出了程式碼就照著寫，不要自己「改良」。
+- **最小改動、照 coding style**：用最簡單、但能完整達成 issue 的做法。只改需要改的行，
+  不重排、不改名、不動無關的註解或格式；新寫、改寫的程式碼照 [coding-style.md](coding-style.md)（issue 另有決定就照 issue）。
+  issue 寫出了程式碼就照著寫，不要自己「改良」。不加 issue 沒要求的抽象、參數、設定或防呆。
 - **在 worktree 裡，git 指令一條一條單獨執行**：Claude Code 的 worktree 隔離會拒絕它無法確認「git 只作用在 worktree 內」的指令，
   例如用 `&&` 把 `make` 和 `git` 串在一起。被拒絕時拆開重跑就好，不要想辦法繞過。
 - 所有溝通、commit 以外的文字（PR、issue 留言）用繁體中文。
@@ -127,6 +128,7 @@ git diff --stat <meta.base_sha> origin/<base>
 
 ### 6. 實作
 
+- 改一個檔案之前，先讀完整個檔案和它的呼叫端、被呼叫端，確定懂了現在的行為再動手；不要只看 issue 引用的那幾行。
 - 照 issue 的「實作步驟」逐步做。遵守改動檔案所在目錄的每一層 `AGENTS.md` / `CLAUDE.md`
   （讀那個目錄的任何檔案時會自動載入；compact 之後要再讀一次）。
 - 大範圍的搜尋交給 Explore subagent，保持自己的 context 乾淨。
@@ -145,7 +147,7 @@ git diff --stat <meta.base_sha> origin/<base>
 3. **並行派兩個 subagent**（它們各自有乾淨的 context，互相看不到對方）：
    - `bombolt:bb-verifier`：逐條執行 DoD；`ui: true` 的話同時拍 after 截圖到 `<artifacts>/shots/`。
    - `bombolt:bb-reviewer`：看 issue ＋ `git diff origin/<base>...HEAD`，找 blocking 問題，
-     並逐段對照 `<artifacts>/walkthrough.md` 跟 code（呼叫時給它這個路徑）。
+     並逐段對照 `<artifacts>/walkthrough.md` 跟 code（呼叫時給它這個路徑，以及 [coding-style.md](coding-style.md) 的完整路徑）。
 4. **不要照單全收**：reviewer 的每一個 blocking 問題你都要自己確認是真的（打開 code、想出失敗情境）。
    確認是真的才修；判斷不是問題的，在 PR 的「請你重點看」說明你為什麼不改。
 5. 有 DoD 沒過、或有確認過的 blocking 問題 → 修，然後進下一輪。
