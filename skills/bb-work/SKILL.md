@@ -100,6 +100,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/bb_worktree.py" create --issue $0 --slug 
 它會 fetch 最新的 `origin/<base>`、建立 `.claude/worktrees/bb-$0-<slug>`（branch 同名）、
 複製設定檔指定的 `.env` 類檔案、寫入 metadata，並回傳 `path` 與 `artifacts`（截圖與進度檔的目錄）。
 `status` 是 `exists` 代表之前已經建過（例如這是 resume），直接沿用。
+`config_source` 說明這個 worktree 用了哪一份設定（通常是 `origin/<base>` 上的）、為什麼，用一句話告訴使用者。
 
 然後用 **EnterWorktree** 工具、帶 `path` 參數進入那個 worktree。之後的所有工作都在 worktree 裡。
 
@@ -116,7 +117,8 @@ git diff --stat <meta.base_sha> origin/<base>
 
 ### 4. 開工準備
 
-- 讀主 checkout 的 `.claude/bombolt.md`，照「開工準備」一節在 worktree 裡安裝依賴等。
+- 讀這個 worktree 的設定快照（`bb_worktree.py info` 回傳的 `config_snapshot`），照「開工準備」一節在 worktree 裡安裝依賴等。
+  之後提到 `.claude/bombolt.md`（包括給 verifier 的路徑）都指這份快照，不讀主 checkout 那份——使用者可能正在那裡切 branch。
 - 在 `<artifacts>/progress.md` 記錄進度（每完成一步就更新）。這是給 resume 用的：
   context 被壓縮或 session 重開之後，先讀這個檔就知道做到哪裡。
 

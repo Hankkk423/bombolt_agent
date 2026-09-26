@@ -143,6 +143,7 @@ class TestWorktree(RepoFixture):
         self.assertEqual(info["copied"], ["backend/.env.local"])
         self.assertTrue((wt / "backend/.env.local").is_file())
         self.assertEqual(len(info["skipped"]), 2)
+        self.assertIn("還沒有", info["config_source"])  # 設定還沒 push：先用主 checkout 那份，並說明
         # metadata 在 git dir 裡，不出現在 git status
         self.assertEqual(sh(["git", "status", "--porcelain"], wt).stdout.strip(), "")
         self.assertEqual(bb_lib.read_meta(wt)["issue"], 12)
@@ -175,6 +176,47 @@ class TestWorktree(RepoFixture):
         # 產物目錄在 worktree 裡，但被忽略：不出現在 git status，也不擋 git worktree remove
         (Path(out["artifacts"]) / "progress.md").write_text("x\n")
         self.assertEqual(sh(["git", "status", "--porcelain"], info["path"]).stdout.strip(), "")
+        self.assertEqual(out["config_snapshot"], str(bb_lib.config_snapshot_path(info["path"])))
+
+    def commit_config_to_origin(self):
+        sh(["git", "checkout", "-q", "-b", "prod", "origin/prod"], self.repo)
+        sh(["git", "add", ".claude/bombolt.md"], self.repo)
+        sh(["git", "commit", "-qm", "config"], self.repo)
+        sh(["git", "push", "-q", "origin", "prod"], self.repo)
+
+    def test_create_uses_origin_config_not_main_checkout(self):
+        self.commit_config_to_origin()
+        cfg = self.repo / ".claude/bombolt.md"
+        cfg.write_text(CONFIG.replace("'make\\s+vercel-env'", "'npm\\s+publish'"))  # 只有本機改過、沒 push
+        info = self.create_wt()
+        self.assertIn("origin/prod", info["config_source"])
+        self.assertIn("沒有採用", info["config_source"])
+        self.assertEqual(bb_lib.config_snapshot_path(info["path"]).read_text().strip(), CONFIG.strip())
+        wt_cfg = bb_lib.load_worktree_config(info["path"], self.repo)
+        self.assertEqual(wt_cfg["deny_commands"], ["make\\s+vercel-env"])
+
+    def test_create_from_branch_without_config(self):
+        # IDE 切到還沒有 bombolt 設定的舊 branch：照樣從 origin/prod 建、拿 origin 上的設定
+        self.commit_config_to_origin()
+        sh(["git", "remote", "set-head", "origin", "prod"], self.repo)
+        sh(["git", "checkout", "-q", "main"], self.repo)
+        info = self.create_wt()
+        self.assertEqual(info["status"], "created")
+        self.assertEqual(info["base"], "prod")
+        self.assertIn("預設 branch", info["config_source"])
+        self.assertEqual(bb_lib.config_snapshot_path(info["path"]).read_text().strip(), CONFIG.strip())
+
+    def test_sync_config_takes_latest_origin_version(self):
+        self.commit_config_to_origin()
+        wt = self.create_wt()["path"]
+        other = self.tmp / "other"
+        sh(["git", "clone", "-q", "-b", "prod", str(self.origin), str(other)], self.tmp)
+        (other / ".claude/bombolt.md").write_text(CONFIG.replace("'make\\s+vercel-env'", "'npm\\s+publish'"))
+        sh(["git", "-c", "user.email=a@b", "-c", "user.name=a", "commit", "-qam", "new rule"], other)
+        sh(["git", "push", "-q", "origin", "prod"], other)
+        out = json.loads(self.run_script("bb_worktree.py", "sync-config", cwd=wt).stdout)
+        self.assertIn("origin/prod", out["config_source"])
+        self.assertEqual(bb_lib.load_worktree_config(wt, self.repo)["deny_commands"], ["npm\\s+publish"])
 
 
 class TestSnapshot(RepoFixture):
@@ -1670,13 +1712,23 @@ class TestPlanCheck(RepoFixture):
         self.assertEqual(sync["status"], "diff")
         self.assertTrue(any("還沒 push" in d for d in sync["diffs"]))
 
-    def test_feature_branch_with_own_commits(self):
+    def test_feature_branch_with_own_commits_is_only_a_note(self):
+        # 規劃一律以 origin/prod 為準：IDE 開在哪個 branch 只告知，不問
         sh(["git", "checkout", "-q", "-b", "feat-x"], self.repo)
         (self.repo / "app.txt").write_text("v2\n")
         sh(["git", "commit", "-qam", "wip"], self.repo)
         sync = self.pc.check_sync(self.repo)
-        self.assertEqual(sync["status"], "diff")
-        self.assertTrue(any("feat-x" in d for d in sync["diffs"]))
+        self.assertEqual(sync["status"], "ok", sync)
+        self.assertTrue(any("feat-x" in n and "1 個 commit" in n for n in sync["notes"]), sync["notes"])
+
+    def test_branch_without_config_uses_origin_default_branch(self):
+        # IDE 切到還沒有 bombolt 設定的舊 branch：不會誤判成「還沒設定」
+        sh(["git", "remote", "set-head", "origin", "prod"], self.repo)
+        sh(["git", "checkout", "-q", "main"], self.repo)
+        self.assertFalse((self.repo / ".claude/bombolt.md").exists())
+        sync = self.pc.check_sync(self.repo)
+        self.assertEqual((sync["status"], sync["base"]), ("ok", "prod"), sync)
+        self.assertTrue(any("預設 branch" in n for n in sync["notes"]), sync["notes"])
 
     def test_other_branch_without_own_commits_is_only_a_note(self):
         sh(["git", "checkout", "-q", "-b", "other", "origin/prod"], self.repo)
@@ -1684,25 +1736,25 @@ class TestPlanCheck(RepoFixture):
         self.assertEqual(sync["status"], "ok", sync)
         self.assertTrue(any("`other`" in n for n in sync["notes"]))
 
-    def test_uncommitted_changes(self):
+    def test_uncommitted_changes_are_only_a_note(self):
         (self.repo / "app.txt").write_text("dirty\n")
         (self.repo / "new.txt").write_text("new\n")
         sync = self.pc.check_sync(self.repo)
-        self.assertEqual(sync["status"], "diff")
-        self.assertTrue(any("2 個沒 commit" in d for d in sync["diffs"]), sync["diffs"])
+        self.assertEqual(sync["status"], "ok", sync)
+        self.assertTrue(any("2 個沒 commit" in n for n in sync["notes"]), sync["notes"])
 
     def test_ignored_files_and_worktrees_are_not_diffs(self):
         # .env、log 被 gitignore；bombolt 的 worktree 在 .git/info/exclude → 都不算差異
         self.create_wt()
         self.assertEqual(self.pc.check_sync(self.repo)["status"], "ok")
 
-    def test_config_differs_from_origin(self):
+    def test_config_differs_from_origin_uses_origin_and_says_so(self):
         cfg = self.repo / ".claude/bombolt.md"
         cfg.write_text(cfg.read_text() + "\n本地改過\n")
         sync = self.pc.check_sync(self.repo)
-        self.assertEqual(sync["status"], "diff")
-        self.assertEqual(len(sync["diffs"]), 1, sync["diffs"])  # 不會同時被算成「沒 commit 的改動」
-        self.assertIn("不一樣", sync["diffs"][0])
+        self.assertEqual(sync["status"], "ok", sync)
+        self.assertFalse(any("沒 commit" in n for n in sync["notes"]), sync["notes"])  # 設定檔另外說明
+        self.assertTrue(any("origin/prod" in n and "沒有採用" in n for n in sync["notes"]), sync["notes"])
 
     def test_config_not_on_origin(self):
         sh(["git", "checkout", "-q", "main"], self.repo)  # main 上沒有 commit 設定檔（checkout 會把它移走）

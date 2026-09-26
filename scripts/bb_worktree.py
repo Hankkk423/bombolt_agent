@@ -6,11 +6,12 @@
   bb_worktree.py info [--path <worktree>]            metadata ＋ artifacts 路徑 ＋ 這台電腦是誰的（owner）
   bb_worktree.py redo-clean --issue 12 --slug bookings-default-month
       重做前清掉前一次的 worktree、本地 branch、遠端 branch（前一次的 PR 必須已經關閉、沒有 merge）
-  bb_worktree.py sync-config [--path <worktree>]   把主 checkout 目前的 .claude/bombolt.md 重新存成這個 worktree 的快照
+  bb_worktree.py sync-config [--path <worktree>]   fetch 之後把 origin/<base> 上的 .claude/bombolt.md 重新存成這個 worktree 的快照
 
-建 worktree 時會把當下的 .claude/bombolt.md 存成快照（放在那個 worktree 的 git dir），
-之後那個 worktree 裡的腳本與安全守門都只讀快照——使用者在主 checkout 切 branch、pull 都不影響它。
-代價是之後改了設定，已經建好的 worktree 要 `sync-config` 才會套用。
+建 worktree 時會把 origin/<base> 上的 .claude/bombolt.md（還沒 push 過就用主 checkout 那份）存成快照
+（放在那個 worktree 的 git dir），之後那個 worktree 裡的腳本與安全守門都只讀快照——
+使用者在主 checkout 切 branch、pull 都不影響它。
+代價是之後改了設定，要 push 到 origin，已經建好的 worktree 再 `sync-config` 才會套用。
 
 一個名字貫穿全程：worktree 目錄 = branch = `bb-<issue>-<slug>`。
 worktree 一律從 `origin/<base_branch>` 的最新版開出來（先 fetch），不帶 upstream，
@@ -46,10 +47,10 @@ def cmd_create(args: argparse.Namespace) -> None:
     repo = bb_lib.main_checkout(Path.cwd())
     if repo is None:
         fail("目前目錄不在 git repo 裡。")
-    cfg = bb_lib.load_config(repo)
-    if cfg is None:
-        fail(f"{repo} 還沒有 {bb_lib.CONFIG_REL}，請先執行 /bombolt:bb-setup。")
-    base = args.base or cfg.get("base_branch")
+    first = bb_lib.base_config(repo)  # 還沒 fetch：只用來知道 base_branch
+    if first["config"] is None:
+        fail(f"{first['source']}，請先執行 /bombolt:bb-setup。")
+    base = args.base or first["config"].get("base_branch")
     if not base:
         fail(f"{bb_lib.CONFIG_REL} 沒有設定 base_branch。")
     if not SLUG_RE.match(args.slug) or len(args.slug) > 40:
@@ -81,6 +82,8 @@ def cmd_create(args: argparse.Namespace) -> None:
     except RuntimeError as e:
         fail(f"fetch origin/{base} 失敗：{e}")
     base_sha = bb_lib.git(["rev-parse", f"origin/{base}"], repo)
+    chosen = bb_lib.base_config(repo)  # fetch 之後再讀一次：origin 上最新的設定
+    cfg = chosen["config"]
 
     path.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -115,10 +118,11 @@ def cmd_create(args: argparse.Namespace) -> None:
         "created_at": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"),
     }
     bb_lib.write_meta(path, meta)
-    bb_lib.snapshot_config(repo, path)  # 之後這個 worktree 只讀這份快照，主 checkout 切 branch 不影響它
+    bb_lib.snapshot_config(path, chosen["text"])  # 之後這個 worktree 只讀這份快照，主 checkout 切 branch 不影響它
     bb_lib.artifacts_dir(path)
     print(json.dumps({"status": "created", **meta, "copied": copied, "skipped": skipped,
-                      "artifacts": str(bb_lib.artifacts_dir(path))}, ensure_ascii=False))
+                      "artifacts": str(bb_lib.artifacts_dir(path)), "config_source": chosen["source"]},
+                     ensure_ascii=False))
 
 
 def cmd_info(args: argparse.Namespace) -> None:
@@ -127,6 +131,7 @@ def cmd_info(args: argparse.Namespace) -> None:
     if meta is None:
         fail(f"{target} 不是 bombolt 建的 worktree。")
     meta["artifacts"] = str(bb_lib.artifacts_dir(target))
+    meta["config_snapshot"] = bb_lib.config_source(target)  # 這個 worktree 讀的設定（空字串：快照功能之前建的）
     meta["session_name"] = bb_lib.session_name(meta.get("session_id", ""))
     owner = bb_lib.owner_info(target)
     meta["owner"] = owner
@@ -227,10 +232,16 @@ def cmd_sync_config(args: argparse.Namespace) -> None:
     if meta is None or meta.get("integration"):
         fail(f"{target} 不是 bombolt 建的 feature worktree。")
     repo = Path(meta["repo"])
-    snap = bb_lib.snapshot_config(repo, target)
-    if snap is None:
-        fail(f"主 checkout 目前沒有 {bb_lib.CONFIG_REL}（切到沒有它的 branch 了？），快照維持不變。")
-    print(json.dumps({"status": "synced", "path": str(target), "snapshot": str(snap)}, ensure_ascii=False))
+    try:
+        bb_lib.git(["fetch", "--quiet", "origin", meta["base"]], repo)
+    except RuntimeError as e:
+        fail(f"fetch origin/{meta['base']} 失敗：{e}，快照維持不變。")
+    chosen = bb_lib.base_config(repo)
+    if chosen["text"] is None:
+        fail(f"{chosen['source']}，快照維持不變。")
+    snap = bb_lib.snapshot_config(target, chosen["text"])
+    print(json.dumps({"status": "synced", "path": str(target), "snapshot": str(snap),
+                      "config_source": chosen["source"]}, ensure_ascii=False))
 
 
 def main() -> None:

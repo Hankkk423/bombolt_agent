@@ -122,6 +122,7 @@ def load_config(repo: Path) -> Optional[Dict[str, Any]]:
 
     ⚠️ 在 bombolt worktree 裡要用 `load_worktree_config()`：主 checkout 的這個檔會跟著使用者
     切 branch 而變（切到沒有它的 branch 時連安全守門的秘密檔清單都會消失）。
+    plan / work 要用 `base_config()`：讀 origin/<base_branch> 上的版本。
     """
     return _read_config_file(repo / CONFIG_REL)
 
@@ -129,7 +130,11 @@ def load_config(repo: Path) -> Optional[Dict[str, Any]]:
 def _read_config_file(path: Path) -> Optional[Dict[str, Any]]:
     if not path.is_file():
         return None
-    cfg = parse_frontmatter(path.read_text(encoding="utf-8"))
+    return _parse_config(path.read_text(encoding="utf-8"))
+
+
+def _parse_config(text: str) -> Dict[str, Any]:
+    cfg = parse_frontmatter(text)
     for key in ("protected_branches", "integration_branches", "copy_files", "secret_paths", "deny_commands"):
         value = cfg.get(key)
         if value is None:
@@ -137,6 +142,44 @@ def _read_config_file(path: Path) -> Optional[Dict[str, Any]]:
         elif isinstance(value, str):
             cfg[key] = [value]
     return cfg
+
+
+def config_text_at(repo: Path, ref: str) -> Optional[str]:
+    """`ref`（例如 origin/main）上 commit 過的 .claude/bombolt.md 原文；ref 或檔案不存在就回 None。"""
+    if not git_ok(["cat-file", "-e", f"{ref}:{CONFIG_REL}"], repo):
+        return None
+    return git(["show", f"{ref}:{CONFIG_REL}"], repo)
+
+
+def base_config(repo: Path) -> Dict[str, Any]:
+    """plan / work 用的設定：origin/<base_branch> 上 commit 過的那份，跟主 checkout 現在在哪個 branch 無關。
+
+    回傳 {"config": 設定或 None, "text": 原文或 None, "source": 給使用者看的一句話（用了哪一份、為什麼）}。
+    - base_branch 從主 checkout 的設定拿；主 checkout 目前的 branch 沒有設定檔，就改看 origin 預設 branch 上的那份。
+    - origin/<base_branch> 上還沒有設定檔（bb-setup 完還沒 push）才用主 checkout 那份。
+    ⚠️ 不會 fetch：要最新版，呼叫前先 fetch origin/<base_branch>。
+    """
+    path = repo / CONFIG_REL
+    local = path.read_text(encoding="utf-8") if path.is_file() else None
+    first, notes = local, []
+    if first is None:
+        first = config_text_at(repo, "origin/HEAD")
+        if first is not None:
+            notes.append("主 checkout 目前的 branch 沒有設定檔，base_branch 改看 origin 預設 branch 上的那份")
+    base = _parse_config(first).get("base_branch") if first is not None else ""
+    if not base:
+        return {"config": None, "text": None,
+                "source": f"找不到 {CONFIG_REL}（主 checkout 目前的 branch 與 origin 預設 branch 都沒有）"}
+    text = config_text_at(repo, f"origin/{base}")
+    if text is None:
+        text = first
+        where = "主 checkout 目前的那份" if local is not None else "origin 預設 branch 上的那份"
+        notes.append(f"`origin/{base}` 上還沒有 {CONFIG_REL}（還沒 push？），先用{where}")
+    else:
+        notes.append(f"用 `origin/{base}` 上的 {CONFIG_REL}")
+        if local is not None and local.strip() != text.strip():
+            notes.append("主 checkout 目前的那份跟它不一樣，沒有採用")
+    return {"config": _parse_config(text), "text": text, "source": "；".join(notes)}
 
 
 # 建 worktree 當下的設定快照：放在那個 worktree 自己的 git dir（跟 bombolt.json 同一層，
@@ -149,12 +192,12 @@ def config_snapshot_path(worktree: str | Path) -> Optional[Path]:
     return gd / CONFIG_SNAPSHOT_NAME if gd is not None else None
 
 
-def snapshot_config(repo: Path, worktree: str | Path) -> Optional[Path]:
-    """把主 checkout 目前的 .claude/bombolt.md 存成這個 worktree 的設定快照；主 checkout 沒有就回 None。"""
-    src, dst = repo / CONFIG_REL, config_snapshot_path(worktree)
-    if dst is None or not src.is_file():
+def snapshot_config(worktree: str | Path, text: str) -> Optional[Path]:
+    """把設定原文（`base_config()` 選出的那份）存成這個 worktree 的設定快照。"""
+    dst = config_snapshot_path(worktree)
+    if dst is None:
         return None
-    dst.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+    dst.write_text(text, encoding="utf-8")
     return dst
 
 

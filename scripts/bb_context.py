@@ -55,12 +55,16 @@ def main() -> None:
     lines.append(f"- origin：`{remote}`" if code == 0 else "- ❌ 沒有 origin remote")
 
     snap = bb_lib.config_source(cwd) if meta else ""
-    cfg = bb_lib.load_worktree_config(cwd, repo) if meta else bb_lib.load_config(repo)
+    chosen = None if meta else bb_lib.base_config(repo)  # 主 checkout：讀 origin/<base> 上的那份（不 fetch）
+    cfg = chosen["config"] if chosen else bb_lib.load_worktree_config(cwd, repo)
     if cfg is None:
-        lines.append(f"- ❌ 還沒有專案設定 `{bb_lib.CONFIG_REL}` → 需要先跑 bb-setup")
+        lines.append(f"- ❌ 還沒有專案設定（{chosen['source'] if chosen else bb_lib.CONFIG_REL}）→ 需要先跑 bb-setup")
     else:
-        where = (f"這個 worktree 建立當下的快照 `{snap}`（主 checkout 之後的改動不會影響它；"
-                 f"要套用新設定跑 `bb_worktree.py sync-config`）") if snap else f"`{repo / bb_lib.CONFIG_REL}`"
+        if snap:
+            where = (f"這個 worktree 建立當下的快照 `{snap}`（主 checkout 之後的改動不會影響它；"
+                     f"origin 上的設定改了之後，跑 `bb_worktree.py sync-config` 套用）")
+        else:
+            where = chosen["source"] if chosen else f"`{repo / bb_lib.CONFIG_REL}`"
         lines.append(
             f"- 專案設定：{where}（base_branch=`{cfg.get('base_branch', '')}` · "
             f"pr_base=`{bb_lib.pr_base(cfg)}` · integration_branches=`{cfg.get('integration_branches', [])}`）"

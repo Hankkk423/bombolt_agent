@@ -2,9 +2,10 @@
 """bb-plan 開工前的兩項檢查（給 SKILL.md 的 !`...` 注入用）：
 
 1. 位置：目前是不是在這個 repo 的**主 checkout**。判斷不出來就回報「無法確定」，由 skill 反問使用者。
-2. 同步：fetch origin/<base_branch>，列出本地跟 remote 會讓規劃不準的差異
-   （本地 base 沒 push 的 commit、目前 branch 不在 origin 上的 commit、沒 commit 的改動、
-   跟 origin 版本不一樣的 .claude/bombolt.md）。
+2. 同步：fetch origin/<base_branch>。規劃一律以 origin/<base_branch> 為準（程式碼與設定檔都是），
+   不管主 checkout 目前在哪個 branch。只有兩種差異要問使用者（通常代表忘了 push）：
+   本地 base 沒 push 的 commit、.claude/bombolt.md 還不在 origin 上。
+   其他（目前 branch 自己的 commit、沒 commit 的改動、設定檔用了哪一份）只告知。
 
 ⚠️ 這支永遠 exit 0：skill 的動態注入只要有一個指令失敗，整個 skill 就載入失敗，
 所以任何問題都印成文字讓 agent 讀。fetch 不會卡在要密碼的提示上（關掉互動、有 timeout）。
@@ -86,11 +87,11 @@ def check_sync(repo: Path) -> Dict[str, Any]:
     notes：不影響規劃、只是讓使用者知道的狀況。
     """
     out: Dict[str, Any] = {"status": SYNC_OK, "base": "", "origin_sha": "", "diffs": [], "notes": [], "detail": ""}
-    cfg = bb_lib.load_config(repo) or {}
-    base = cfg.get("base_branch") or ""
+    chosen = bb_lib.base_config(repo)
+    base = (chosen["config"] or {}).get("base_branch") or ""
     out["base"] = base
     if not base:
-        out.update(status=SYNC_NO_BASE, detail=f"`{bb_lib.CONFIG_REL}` 不存在或沒有 base_branch，無法比對")
+        out.update(status=SYNC_NO_BASE, detail=f"{chosen['source']}，無法比對")
         return out
 
     code, msg = _git(["fetch", "--quiet", "origin", base], repo, timeout=FETCH_TIMEOUT, env=_fetch_env())
@@ -124,22 +125,19 @@ def check_sync(repo: Path) -> Dict[str, Any]:
         notes.append(f"目前在 branch `{branch}`（不是 `{base}`）")
         code, n = _git(["rev-list", "--count", f"{origin_ref}..HEAD"], repo)
         if code == 0 and int(n or 0):
-            diffs.append(f"目前的 branch `{branch}` 有 {n} 個 commit 不在 `{origin_ref}` 裡（規劃看不到它們）")
+            notes.append(f"目前的 branch `{branch}` 有 {n} 個 commit 不在 `{origin_ref}` 裡（規劃以 origin 為準，看不到它們）")
 
     # 沒 commit 的改動（.claude/worktrees 已被 .git/info/exclude 忽略；設定檔另外看）
     code, status = _git(["status", "--porcelain", "--untracked-files=all", "--", ".", f":(exclude){bb_lib.CONFIG_REL}"], repo)
     if code == 0 and status:
         files = [line[3:] for line in status.splitlines()]
         shown = "、".join(f"`{f}`" for f in files[:5]) + ("…" if len(files) > 5 else "")
-        diffs.append(f"主 checkout 有 {len(files)} 個沒 commit 的改動（規劃看不到）：{shown}")
+        notes.append(f"主 checkout 有 {len(files)} 個沒 commit 的改動（規劃以 origin 為準，看不到它們）：{shown}")
 
-    # 專案設定：規劃讀的是主 checkout 這一份，它跟 origin 不一樣就會用到過期或還沒上 remote 的設定
-    local_cfg = repo / bb_lib.CONFIG_REL
-    in_origin = _git(["cat-file", "-e", f"{origin_ref}:{bb_lib.CONFIG_REL}"], repo)[0] == 0
-    if local_cfg.is_file() and not in_origin:
-        diffs.append(f"`{bb_lib.CONFIG_REL}` 還不在 `{origin_ref}` 上（實作 session 與同事拿不到這份設定）")
-    elif local_cfg.is_file() and _git(["diff", "--quiet", origin_ref, "--", bb_lib.CONFIG_REL], repo)[0] != 0:
-        diffs.append(f"主 checkout 的 `{bb_lib.CONFIG_REL}` 跟 `{origin_ref}` 上的版本不一樣")
+    # 專案設定：規劃與實作都用 origin 上那份；還不在 origin 上時只好先用本機的，同事拿不到
+    if (repo / bb_lib.CONFIG_REL).is_file() and bb_lib.config_text_at(repo, origin_ref) is None:
+        diffs.append(f"`{bb_lib.CONFIG_REL}` 還不在 `{origin_ref}` 上（這台電腦先用本機那份，同事拿不到）")
+    notes.append(f"設定檔：{bb_lib.base_config(repo)['source']}")
 
     if diffs:
         out["status"] = SYNC_DIFF

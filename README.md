@@ -144,13 +144,12 @@ claude
 
 開工前一定先過兩道檢查（`scripts/bb_plan_check.py`）：
 - **位置**：不在主 checkout（例如在 worktree 裡）就停下來，告訴你主 checkout 的路徑；判斷不出來就一定會問你。
-- **同步**：先 fetch `origin/<base_branch>`，列出本地跟 remote 的差異，例如：
+- **同步**：先 fetch `origin/<base_branch>`。規劃一律以它為準（程式碼與 `.claude/bombolt.md` 都是），
+  不管主 checkout 目前在哪個 branch。只有兩種情況會問你要先處理、還是照樣規劃（通常代表忘了 push）：
   - `base_branch` 有沒 push 的 commit
-  - 目前的 branch 有不在 origin 的 commit
-  - 有沒 commit 的改動
-  - `.claude/bombolt.md` 跟 origin 版本不同
+  - `.claude/bombolt.md` 還不在 origin 上
 
-  有差異就問你要先處理，還是照樣以 origin 為準規劃。fetch 失敗就不規劃。
+  其他（目前 branch 自己的 commit、沒 commit 的改動、用了哪一份設定）只告知你。fetch 失敗就不規劃。
 issue 開好之後，這個 session 就可以結束了。**可以連續規劃多個需求**，每次各開一個 issue；
 之後有空再依序開 session 實作（下一步）。
 
@@ -257,9 +256,10 @@ base 是 `pr_base` 時，解析內文的 `Closes #N` 並關閉）——那是專
 
 `.claude/worktrees/` 與 `.bombolt/` 會被自動加進本機的 `.git/info/exclude`，不需要改專案的 `.gitignore`。
 
-**你在主 checkout 切 branch、pull，不會影響正在跑的 worktree**：程式碼本來就各自獨立；
-`.claude/bombolt.md` 則是在建 worktree 當下存一份快照（放在那個 worktree 的 git dir），之後那個
-worktree 裡的腳本與安全守門只讀快照。代價：改了設定之後，已經建好的 worktree 要在裡面跑
+**你在主 checkout（IDE 開的那個 repo 資料夾）切 branch、pull，不會影響 bombolt**：
+plan 和 work 一律從最新的 `origin/<base_branch>` 開始，`.claude/bombolt.md` 也讀 origin 上的那份
+（還沒 push 過才用本機的），用了哪一份會告訴你。建 worktree 時會把這份設定存成快照（放在那個 worktree 的 git dir），
+之後那個 worktree 裡的腳本與安全守門只讀快照。代價：改了設定要先 push，已經建好的 worktree 再在裡面跑
 `python3 <bombolt>/scripts/bb_worktree.py sync-config` 才會套用（新建的 worktree 自動是新的）。
 
 ## 公司／個人兩個 GitHub 帳號（`bb-gh`）

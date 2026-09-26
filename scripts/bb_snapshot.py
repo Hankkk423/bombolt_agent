@@ -35,10 +35,10 @@ def cmd_create(args: argparse.Namespace) -> None:
     repo = bb_lib.main_checkout(Path.cwd())
     if repo is None:
         fail("目前目錄不在 git repo 裡。")
-    cfg = bb_lib.load_config(repo) or {}
-    base = args.base or cfg.get("base_branch")
+    chosen = bb_lib.base_config(repo)
+    base = args.base or (chosen["config"] or {}).get("base_branch")
     if not base:
-        fail(f"不知道 base branch：{bb_lib.CONFIG_REL} 不存在或沒有 base_branch，請先執行 /bombolt:bb-setup。")
+        fail(f"不知道 base branch：{chosen['source']}，請先執行 /bombolt:bb-setup。")
     bb_lib.ensure_local_exclude(repo, f"/{bb_lib.WORKTREES_REL}/")
     try:
         bb_lib.git(["fetch", "--quiet", "origin", base], repo)

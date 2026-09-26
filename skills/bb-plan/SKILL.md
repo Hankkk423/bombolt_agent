@@ -59,12 +59,15 @@ $ARGUMENTS
   使用者說「是」之後，跑 `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/bb_plan_check.py" --assume-main` 補做同步檢查（照 B 處理）；
   說「不是」就結束 session。
 
-**B. 同步：規劃要以 remote 的最新版為準**（看「同步」那一行；腳本已經 fetch 過 `origin/<base>`）
+**B. 同步：規劃一律以 `origin/<base>` 的最新版為準**（程式碼與設定檔都是，不管主 checkout 目前在哪個 branch；
+看「同步」那一行，腳本已經 fetch 過 `origin/<base>`）
+- 不論結果，先用一兩句話把 `ℹ️` 那幾行告訴使用者，特別是「設定檔」那一行（用了哪一份設定、為什麼）。`ℹ️` 只是告知，不用問。
 - ✅ → 繼續。
-- ⚠️ 本地跟 remote 有差異 → **一定要用 AskUserQuestion 問**，把每一條差異列給使用者看（`ℹ️` 開頭的只是告知，不用問）。選項：
-  - 「先處理再規劃」（建議）：使用者自己 push／commit／切 branch 之後，重跑 `bb_plan_check.py`，直到沒有差異或使用者選下一個。
+- ⚠️ 本地跟 remote 有差異（本地 base 有沒 push 的 commit、設定檔還不在 origin 上）→ **一定要用 AskUserQuestion 問**，
+  把每一條差異列給使用者看。選項：
+  - 「先處理再規劃」（建議）：使用者自己 push 之後，重跑 `bb_plan_check.py`，直到沒有差異或使用者選下一個。
   - 「照樣規劃，以 `origin/<base>` 為準」：把「使用者知道本地有這些差異、選擇以 origin 為準」寫進 issue 的「預設決定」。
-  - `.claude/bombolt.md` 跟 origin 不一樣時要特別說明：規劃讀的是本地這份，實作 session 與同事讀到的可能是另一份。
+  - 設定檔還不在 origin 上時要特別說明：這台電腦的規劃與實作會先用本機那份，但同事拿不到。
 - ❌ fetch 失敗 → 不能規劃（第 2 步的快照也要 fetch）。把錯誤訊息給使用者看，用 AskUserQuestion 問：
   「修好網路／登入後重試」（建議，重跑 `bb_plan_check.py`）或「先結束這個 session」。
 - ⏭️ 還不能檢查（沒有設定檔）→ 先完成下面的 bb-setup，再重跑 `bb_plan_check.py`，照上面處理。
@@ -73,7 +76,8 @@ $ARGUMENTS
   - 沒有 `.claude/bombolt.md` → 告訴使用者需要先設定，然後照 `/bombolt:bb-setup` 的流程完成設定（直接在這個 session 做），再回來繼續。
   - gh 沒裝或版本太舊 → 請使用者在提示列輸入 `! brew install gh` 或 `! brew upgrade gh`，等他完成。
   - gh 沒登入 → 請使用者在提示列輸入 `! gh auth login`，等他完成。
-- 讀 `.claude/bombolt.md`（在主 checkout），知道這個 repo 的 base branch、閘門、怎麼啟動與登入。
+- 讀「設定檔」那一行說的那份 `.claude/bombolt.md`（通常是 `git show origin/<base>:.claude/bombolt.md`；
+  說用本機的才讀主 checkout 那份），知道這個 repo 的 base branch、閘門、怎麼啟動與登入。之後提到它都指這一份。
 
 ### 1. 用一句話覆述需求
 
@@ -152,7 +156,8 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/bb_snapshot.py" create
 
 ### 8. 冷讀：找出實作者會卡住的地方
 
-派 `bombolt:bb-cold-reader` subagent，只給它：**草稿檔路徑、快照路徑、`.claude/bombolt.md` 路徑**。
+派 `bombolt:bb-cold-reader` subagent，只給它：**草稿檔路徑、快照路徑、`.claude/bombolt.md` 路徑**
+（快照裡的 `<快照路徑>/.claude/bombolt.md`；設定還不在 origin 上時，快照裡沒有，才給主 checkout 那份）。
 （不要給它這次對話的任何摘要——它的價值就在於它不知道你知道什麼。）
 
 它會回報兩種問題：
