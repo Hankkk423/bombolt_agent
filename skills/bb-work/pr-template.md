@@ -60,6 +60,10 @@ bombolt PR 模板。讀者是要決定能不能 merge 的人：重點、不廢�
 
 1. {{最需要人判斷的地方，以及為什麼}}
 
+## 📋 人工測試（merge 前）
+
+{{<artifacts>/test-guide.md 的內容（照 test-guide.md 寫、最後一輪 verifier 照做過一遍的）}}
+
 ## 🔜 Follow-up
 
 - {{這次刻意不做、但之後可能要做的事；沒有寫「無」}}

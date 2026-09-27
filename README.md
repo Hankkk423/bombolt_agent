@@ -21,13 +21,14 @@
 /bombolt:bb-work <n>  ── 實作 session（新開的） ────────────────────────────────
    確認沒有人在做 → 認領（issue 上的狀態留言：誰、哪台電腦）
    → 從 origin/<base_branch> 最新版開 worktree → 拍 before 截圖 → 實作
-   → 驗收迴圈：獨立 verifier 逐條跑完成定義 ＋ 獨立 reviewer 看 diff（最多 3 輪）
+   → 驗收迴圈：獨立 verifier 啟動服務、逐條跑完成定義、照人工測試步驟實際操作一遍
+     ＋ 獨立 reviewer 看 diff（最多 3 輪）
    → 發 PR 到 pr_base（逐段改動：高層次的 Files changed、驗收證據、before/after 截圖、
-     resume 方式與 session 在誰的電腦）
-   → 完成定義全過就整合進 dev 這類 integration_branches   （worktree 與 session 保留）
+     merge 前的人工測試步驟、resume 方式與 session 在誰的電腦）
+   → 完成定義全過就整合進 stage 這類 integration_branches （worktree 與 session 保留）
    │
    ▼
-你在 GitHub 上 review ── 沒問題 → merge
+你在 GitHub 上 review、照 PR 的「📋 人工測試」測 ── 沒問題 → merge
    │ 有問題                          │ 整個不行
    ▼                                 ▼
 在 PR 留 review comment             關掉 PR（留一句為什麼）→ /bombolt:bb-work <n> 重做
@@ -39,7 +40,7 @@
 /bombolt:bb-sweep  ── 每週一次 ──────────────────────────────────────────────
    只刪「PR 已 merge ＋ 乾淨 ＋ 沒 push 的都 push 了 ＋ 沒有 session 在用」的 worktree
 
-（發版後會把 integration_branches（例如 dev）reset 回 base_branch 的話：人發完版、reset 完之後，
+（發版後會把 integration_branches（例如 stage）reset 回 base_branch 的話：人發完版、reset 完之後，
  在主 checkout 執行 /bombolt:bb-fix，把這波沒上版的 PR 一次追上最新 base_branch 並重新整合回去）
 ```
 
@@ -106,9 +107,10 @@ claude
 - feature branch 從哪一支長出來、PR 開到哪一支
 - 哪些指令全綠才算完成（驗證閘門）
 - 要複製進 worktree 的 `.env`
-- UI 驗收怎麼登入（不碰真實資料）
+- 驗收怎麼登入（不碰真實資料）、本機啟動的服務會不會真的對外發訊息
 - 平行做多個 issue 時，port／資料庫怎麼隔開
 - 這個 repo 額外的安全禁區
+- merge 前你在哪裡做人工測試（stage 或本機）
 
 問完之後，它會產生 `.claude/bombolt.md`，並實際跑一次啟動和登入的步驟確認寫得對。
 `.claude/worktrees/` 會自動加進本機的 `.git/info/exclude`，不用改 `.gitignore`。
@@ -215,8 +217,8 @@ PR 是 MERGED、本地 tip 等於 PR merge 時的 head、不在受保護名單�
 
 ### 發版後同步：在主 checkout 執行 `/bombolt:bb-fix`
 
-有些 repo 上完版之後，會把 `integration_branches`（例如 stage 用的 `dev`）`reset --hard` 回最新的 `base_branch`。
-這波沒上版的 PR 還開著，卻已經不在 `dev` 裡了。
+有些 repo 上完版之後，會把 `integration_branches`（例如測試環境用的 `stage`）`reset --hard` 回最新的 `base_branch`。
+這波沒上版的 PR 還開著，卻已經不在 `stage` 裡了。
 
 **reset 做完之後**，在主 checkout 開一個 session 執行 `/bombolt:bb-fix`：把這些 PR（本機還有 worktree 的）
 一次追上最新的 `base_branch`、解決衝突，並重新整合進每個 `integration_branches`。
@@ -229,7 +231,7 @@ PR 是 MERGED、本地 tip 等於 PR merge 時的 head、不在受保護名單�
 有些 repo 的節奏是：feature 從 `base_branch`（例如 `prod`）長出來，但 PR 開到單獨的
 `pr_base`（例如 `release`），上版由人自己手動控制——挑幾個 PR 併進 `release`、
 再把 `release` 併進 `prod`、`push`，讓部署流程接手；上完之後把 `release` 與
-`integration_branches`（例如 `dev`）都 `reset --hard` 回最新的 `prod`。
+`integration_branches`（例如 `stage`）都 `reset --hard` 回最新的 `prod`。
 
 `.claude/bombolt.md` 設定 `pr_base`（不設就跟 `base_branch` 一樣）即可啟用這個模式。
 發版後一樣在主 checkout 執行 `/bombolt:bb-fix`；這個模式下它還會把最新的 `base_branch` 合進每個沒上版的 PR。

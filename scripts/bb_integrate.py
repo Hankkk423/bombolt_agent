@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""把 feature branch 用 merge commit（--no-ff）整合進 integration branch（例如 dev＝stage）。
+"""把 feature branch 用 merge commit（--no-ff）整合進 integration branch（例如測試環境用的 stage）。
 
 用法（在 bombolt worktree 裡執行）：
-  bb_integrate.py start  --target dev    → fetch 最新 origin/dev，在暫存 worktree 裡 merge，成功就 push
-  bb_integrate.py finish --target dev    → 衝突解完之後：檢查沒有衝突標記、完成 merge commit、push
-  bb_integrate.py abort  --target dev    → 放棄這次整合，刪掉暫存 worktree（dev 不受影響）
+  bb_integrate.py start  --target stage  → fetch 最新 origin/stage，在暫存 worktree 裡 merge，成功就 push
+  bb_integrate.py finish --target stage  → 衝突解完之後：檢查沒有衝突標記、完成 merge commit、push
+  bb_integrate.py abort  --target stage  → 放棄這次整合，刪掉暫存 worktree（stage 不受影響）
 
 設計：
 - target 必須列在 `.claude/bombolt.md` 的 integration_branches，否則拒絕。

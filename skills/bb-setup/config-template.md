@@ -11,7 +11,7 @@ base_branch: {{base_branch}}
 pr_base: {{pr_base}}
 
 # PR 開好（而且完成定義全部通過）之後，要用 merge commit（--no-ff）整合進去的 branch，
-# 例如 stage 用的 dev。每次 bb-fix 更新 PR 之後也會再整合一次。沒有就留空 []。
+# 例如測試環境用的 stage。每次 bb-fix 更新 PR 之後也會再整合一次。沒有就留空 []。
 integration_branches: [{{integration_branches}}]
 
 # 不允許 push 的 branch（main/master/prod/production/release 已內建，這裡是額外的）
@@ -62,15 +62,29 @@ deny_commands:
 
 {{gates}}
 
-## 啟動 app（UI 驗收與截圖用）
+## 啟動 app（實際驗收與截圖用；純後端也要寫）
 
-<!-- 並行的 worktree 之間怎麼隔開（port、資料庫、cookie…）。需要編號的話用 issue 編號（`bb_worktree.py info` 印得出來）。 -->
+<!-- 並行的 worktree 之間怎麼隔開（port、資料庫、cookie…）。需要編號的話用 issue 編號（`bb_worktree.py info` 印得出來）。
+     純後端：怎麼確認服務起來了（例如打哪個端點會回什麼）。
+     本機啟動的服務會不會真的對外發訊息、寄信、扣款（.env 用的是 sandbox 還是正式的金鑰）：
+     這裡寫明是 sandbox 或 mock 的，verifier 才會操作會觸發它們的功能。 -->
 
 {{run_app}}
 
 ## 登入與測試資料
 
 {{login}}
+
+## 人工測試（PR 的「📋 人工測試」用）
+
+<!-- 人 review 完 PR、按 merge 之前自己在哪裡測：
+     stage：哪一支（通常是 integration_branches）部署到哪個網址、要多久、
+     怎麼確認 stage 上已經是某個 commit（例如部署紀錄、版本頁）、stage 上用哪個測試帳號。
+     本機：在哪個目錄（通常是 PR 的 worktree）、用什麼指令啟動、開哪個網址。
+     每次都要人看的項目（例如手機版）也寫在這裡。密碼不要寫進來，寫去哪裡拿。
+     沒有這一節的話，PR 的人工測試以本機、照「啟動 app」寫。 -->
+
+{{manual_test}}
 
 ## 截圖慣例
 

@@ -21,7 +21,7 @@ disable-model-invocation: true
 
 - **完全自主**：使用者已經在規劃階段回答完所有問題，這裡不要再問人。
   例外只有：第 1 步發現別人在做、或要重做時，下面的「停工提問」後門，以及安全守門擋下來的動作。
-- **完成 ＝ issue 的「🏁 完成定義」每一條都有證據地通過**，而且獨立 reviewer 沒有 blocking 問題。
+- **完成 ＝ issue 的「🏁 完成定義」每一條都有證據地通過**（AI 不能做的標 ⚠️ 交給人測，見第 7 步），而且獨立 reviewer 沒有 blocking 問題。
   不是「code 寫完了」，也不是「應該沒問題」。
 - **只做 issue 範圍內的事**。看到別的問題寫進 PR 的 Follow-up，不要順手改。
 - **最小改動、照 coding style**：用最簡單、但能完整達成 issue 的做法。只改需要改的行，
@@ -143,19 +143,28 @@ git diff --stat <meta.base_sha> origin/<base>
 每一輪：
 
 1. **自己先跑閘門**（`.claude/bombolt.md` 的「驗證閘門」），有紅燈先修到綠。
-2. **寫（或更新）逐段改動**：照 [walkthrough.md](walkthrough.md) 用腳本產生骨架、寫 `<artifacts>/walkthrough.md`，
+2. **寫（或更新）逐段改動與人工測試指南**：照 [walkthrough.md](walkthrough.md) 用腳本產生骨架、寫 `<artifacts>/walkthrough.md`，
    再跑 `render` 到 `ok`（產生 `<artifacts>/walkthrough.rendered.md`）。它是高層次的 Files changed
    （逐檔、逐段的精簡 code ＋ 說明），會放進 PR，使用者靠它決定能不能 merge，所以這一輪 code 改了什麼，它就要跟著改。
+   再照 [test-guide.md](test-guide.md) 寫 `<artifacts>/test-guide.md`（PR 的「📋 人工測試」），一樣跟著 code 改。
 3. **並行派兩個 subagent**（它們各自有乾淨的 context，互相看不到對方）：
-   - `bombolt:bb-verifier`：逐條執行 DoD；`ui: true` 的話同時拍 after 截圖到 `<artifacts>/shots/`。
+   - `bombolt:bb-verifier`：啟動服務、逐條執行 DoD，再照 `<artifacts>/test-guide.md` 在本機實際操作一遍（呼叫時給它這個路徑）；
+     `ui: true` 的話同時拍 after 截圖到 `<artifacts>/shots/`。
    - `bombolt:bb-reviewer`：看 issue ＋ `git diff origin/<base>...HEAD`，找 blocking 問題，
-     並逐段對照 `<artifacts>/walkthrough.md` 跟 code（呼叫時給它這個路徑，以及 [coding-style.md](coding-style.md) 的完整路徑）。
+     並逐段對照 `<artifacts>/walkthrough.md` 跟 code、檢查 `<artifacts>/test-guide.md` 有沒有漏測
+     （呼叫時給它這兩個路徑，以及 [coding-style.md](coding-style.md) 的完整路徑）。
 4. **不要照單全收**：reviewer 的每一個 blocking 問題你都要自己確認是真的（打開 code、想出失敗情境）。
    確認是真的才修；判斷不是問題的，在 PR 的「請你重點看」說明你為什麼不改。
-5. 有 DoD 沒過、或有確認過的 blocking 問題 → 修，然後進下一輪。
+5. 有 DoD 沒過、照指南操作發現 code 的問題、或有確認過的 blocking 問題 → 修，然後進下一輪。
    如果只有逐段改動跟 code 對不上、code 本身沒問題：改說明就好，再派 reviewer 只對照說明一次，不用重跑 verifier。
+   照指南操作只有指南本身的問題（預期寫錯、步驟寫得不清楚）、或有原因不是 code 的 ⚠️ 無法驗證：
+   照 [test-guide.md](test-guide.md) 的「照做一遍之後」處理，不用整輪重跑。
+   reviewer 只回報指南漏測、code 本身沒問題：補進指南，再派 verifier 只照新加的步驟做一次，不用整輪重跑。
 
 **結束條件**：verifier 回報全部通過 **且** 沒有確認過的 blocking 問題 → 進第 8 步。
+- verifier 要有實際啟動服務操作過；沒有的話要寫出不適用或啟動不了的理由（port 被佔、缺依賴這類環境問題先自己排除再重跑）。
+- DoD 或指南的步驟標 ⚠️ 無法驗證、原因不是 code（例如操作會真的寄信、扣款，或設定檔沒寫怎麼登入）：
+  不算沒過，改 code 也修不好。移進指南的「要你測的」並寫出原因，照常發 PR、照常整合。
 
 **跑滿 3 輪還沒過**：不要無限迴圈。照樣發 PR，但用 `--draft`，標題前加 `🚧`，
 在 PR 最上面寫清楚「哪幾條沒過、試過什麼、卡在哪裡」，然後告訴使用者。
@@ -172,6 +181,7 @@ git diff --stat <meta.base_sha> origin/<base>
      下面接 `<artifacts>/walkthrough.rendered.md`（最後一輪 reviewer 對照過的 `walkthrough.md` 用 `render` 轉出來的），
      連結裡的 `{{PR_URL}}` 保持原樣。
      這一節是讓使用者不用打開 Files changed 就看懂每一段 code 在做什麼。
+   - 「📋 人工測試」：貼最後一輪 verifier 照做過一遍的 `<artifacts>/test-guide.md`。
    - 「🔁 要修改的話」：跑 `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/bb_worktree.py" info`，
      `owner_text`、`owner_short` 照抄（session 只存在這台電腦，看 PR 的人要知道去哪台電腦 resume）。
      session 名稱用上面「現況」裡印出的名稱（使用者用 `claude -n` 取的）；查不到就填「（未命名）」。
@@ -197,7 +207,7 @@ git diff --stat <meta.base_sha> origin/<base>
 
 ### 9. 整合進 integration branch（`.claude/bombolt.md` 的 `integration_branches` 有設定才做）
 
-**只有完成定義全部通過（不是 🚧 draft PR）才整合。** 對每一個 integration branch，在 feature worktree 裡：
+**只有完成定義全部通過（不是 🚧 draft PR；交給人測的 ⚠️ 不影響）才整合。** 對每一個 integration branch，在 feature worktree 裡：
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/bb_integrate.py" start --target <branch>
@@ -217,7 +227,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/bb_integrate.py" start --target <branch>
 
 - issue 上的狀態留言在第 8 步已經改成「審查中」，不用另外留言。
 - **worktree 與 session 都保留**（不要呼叫 ExitWorktree），使用者 review 之後可能要回來修改。
-- 告訴使用者：PR 網址、驗收結果摘要、要他特別看的地方，以及修改的方式：
+- 告訴使用者：PR 網址、驗收結果摘要、要他特別看的地方、人工測試有幾步（預計幾分鐘），以及修改的方式：
   在 PR 留 review comment → 在任何目錄執行 `claude --resume ${CLAUDE_SESSION_ID}`（會自動回到這個 worktree）→ `/bombolt:bb-fix`
 
 ---

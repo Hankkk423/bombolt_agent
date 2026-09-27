@@ -11,7 +11,7 @@ base_branch: main
 pr_base:
 
 # PR 開好（而且完成定義全部通過）之後，要用 merge commit（--no-ff）整合進去的 branch，
-# 例如 stage 用的 dev。每次 bb-fix 更新 PR 之後也會再整合一次。沒有就留空 []。
+# 例如測試環境用的 stage。每次 bb-fix 更新 PR 之後也會再整合一次。沒有就留空 []。
 integration_branches: []
 
 # 不允許 push 的 branch（main/master/prod/production/release 已內建，這裡是額外的）
@@ -72,7 +72,7 @@ npm test         # 約 1 分鐘，最後一行是 "Tests: N passed"
 npm run build    # 約 1 分鐘
 ```
 
-## 啟動 app（UI 驗收與截圖用）
+## 啟動 app（實際驗收與截圖用；純後端也要寫）
 
 平行的 worktree 用 issue 編號錯開 port 和資料庫，才不會互相干擾：
 
@@ -82,12 +82,17 @@ PORT=$((3000 + <issue 編號> % 1000)) DATABASE_URL=file:./.bombolt/dev.db npm r
 
 成功時 log 會出現 `ready on http://localhost:<port>`。
 `.bombolt/` 是每個 worktree 自己的暫存目錄，不會被 commit。
+本機沒有串任何對外的服務（寄信、金流），verifier 可以放心操作。
 
 ## 登入與測試資料
 
 - 先跑 `DATABASE_URL=file:./.bombolt/dev.db npm run db:seed`，會建立測試帳號 `demo@example.com`。
 - 密碼在 `.env` 的 `SEED_PASSWORD`，不要寫進這份檔案。
 - 不要用真實客戶的帳號登入。
+
+## 人工測試（PR 的「📋 人工測試」用）
+
+在本機測：到 PR 寫的 worktree，照上面「啟動 app」啟動（同一個 port），打開 `http://localhost:<port>`，用 `demo@example.com` 登入。
 
 ## 截圖慣例
 

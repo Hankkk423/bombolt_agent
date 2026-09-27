@@ -34,7 +34,8 @@ argument-hint: "[可選：補充說明]"
 - **環境檔**：`git ls-files --others --ignored --exclude-standard` 裡看起來是設定檔的（`.env*` 等）→ 候選 `copy_files`。**只看檔名，不要讀內容。**
 - **可能是秘密的非 `.env` 檔**（`*-log.txt`、`*.env`、`credentials*`、`secrets*`…）→ 候選 `secret_paths`。
 - **正式環境相關指令**（deploy、推環境變數、改正式資料庫的 make target）→ 候選 `deny_commands`。
-- **UI**：有沒有前端、怎麼啟動、dev server 的 port、登入流程。
+- **怎麼啟動服務**：有前端的話怎麼啟動、dev server 的 port、登入流程；純後端的話 API 的 port、怎麼確認服務起來了；
+  有 stage 的話，CI/CD 把哪一支部署到哪個網址。
 - **worktree 怎麼裝依賴**：worktree 是全新的 checkout，沒有 `node_modules`、`.venv` 之類。找出在 worktree 裡安裝依賴的指令。
   ⚠️ 不要借用主 checkout 的虛擬環境：editable install（`pip install -e`、workspace link）會讓 worktree 跑到主 checkout 的程式碼。
 - **commit 慣例**：`git log --oneline -30 origin/<base>`，歸納 commit message 的格式（前綴、語言、長度）。
@@ -49,7 +50,7 @@ argument-hint: "[可選：補充說明]"
    - PR 開到哪一支？跟上面同一支就不用另外記；不同的話（例如 feature 從 `prod` 長出來，
      但 PR 開到單獨的 `release` branch，上版由人手動決定何時把 `release` 併進 `base_branch`）→ `pr_base`。
      ⚠️ `pr_base` 若尚未推上 `origin`，開 PR 會失敗——提醒使用者先 `git push -u origin <pr_base>`。
-   - PR 開好之後，要不要先整合進某一支（例如 stage 用的 dev）讓人測試？（→ `integration_branches`；
+   - PR 開好之後，要不要先整合進某一支（例如測試環境用的 stage）讓人測試？（→ `integration_branches`；
      bombolt 固定用 merge commit `--no-ff`、只在完成定義全過時整合、每次 bb-fix 後再整合一次、衝突由 agent 解）
    - 人上版之後會不會把 `integration_branches`（`pr_base` ≠ `base_branch` 時還有 `pr_base`）reset 回
      `base_branch`（例如 `git reset --hard origin/prod`）？會的話，發版後這波沒上的 PR 要重新整合回去
@@ -58,10 +59,15 @@ argument-hint: "[可選：補充說明]"
 2. **驗證閘門**：哪些指令必須全綠才算完成？（列出你找到的，讓使用者勾選 multiSelect）
    跑很久的（> 5 分鐘）問有沒有比較快的替代方式。會碰到真實資料或外部服務的指令要標出來、不建議放進閘門。
 3. **複製哪些 gitignored 檔到 worktree**（multiSelect）。
-4. **UI 驗收怎麼登入**：實作 session 要自己開瀏覽器驗收，它要怎麼拿到一個可以登入、**又不會碰到真實客戶資料**的帳號？
+4. **驗收怎麼登入**：實作 session 要自己啟動服務、開瀏覽器或呼叫 API 驗收，它要怎麼拿到一個可以登入（純後端：測試用的 token）、
+   **又不會碰到真實客戶資料**的帳號？
    （例如：註冊一個新的測試帳號、seed script、專用的測試帳號）⚠️ 不要叫使用者把密碼寫進設定檔。
+   另外問：本機啟動的服務會不會真的對外發訊息、寄信、扣款（`.env` 是 sandbox 還是正式的金鑰）？
+   問使用者，不要自己讀 `.env`（→「啟動 app」一節）。
 5. **並行時的衝突**：兩個 worktree 同時啟動 app 時，port / 資料庫 / 快取會不會打架？要怎麼隔開？
 6. **額外禁區**：你找到的候選 `secret_paths` / `deny_commands` 要不要擋？還有沒有別的？
+7. **人工測試在哪裡做**：PR 開好之後，使用者 merge 前自己在哪裡測？stage（有 `integration_branches` 時建議：
+   網址、部署要多久、怎麼確認 stage 上已經是某個 commit、stage 的測試帳號）還是本機？有沒有每次都要人看的項目？（→「人工測試」一節）
 
 第 3 步的「忽略清單」與第 4 步的「commit／settings.json」問題，併進最後一輪一起問。
 模板裡其他欄位（專案知識、commit 慣例、截圖慣例）用第 1 步的調查結果填；調查不出來、又會影響實作的，才加進題目問。

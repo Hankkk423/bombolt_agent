@@ -2,7 +2,7 @@
 """發版之後，把還沒被這波帶走的 feature worktree／PR 追上最新的 base_branch，並重新整合進 integration_branches。
 由 bb-fix 使用：在某個 PR 的 session 裡只同步那一個，在主 checkout 則一次同步全部。
 
-適用情境：人手動發完一波版之後，把 `integration_branches`（例如 dev）reset 回最新的 `base_branch`
+適用情境：人手動發完一波版之後，把 `integration_branches`（例如 stage）reset 回最新的 `base_branch`
 （`pr_base` 跟 `base_branch` 不同時，`pr_base` 也一起 reset）——這時候**這波沒被帶走**的 PR 還開著，
 但已經不在 integration branch 裡了；`pr_base` 跟 `base_branch` 不同的話，它們的 feature branch 也還停在舊的 base。
 

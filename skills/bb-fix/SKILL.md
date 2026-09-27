@@ -83,11 +83,14 @@ bb-gh api graphql -f query='
 
 ### 4. 重新驗收
 
-跟 bb-work 的第 7 步完全一樣（閘門 → 更新逐段改動 → 並行派 `bombolt:bb-verifier` 與 `bombolt:bb-reviewer` → 確認 → 修，最多 3 輪）。
+跟 bb-work 的第 7 步完全一樣（閘門 → 更新逐段改動與人工測試指南 → 並行派 `bombolt:bb-verifier` 與 `bombolt:bb-reviewer` → 確認 → 修，最多 3 輪）。
 reviewer 要看的是**整個 PR 的 diff**（`git diff origin/<base>...HEAD`），不只這一輪的改動。
 逐段改動（`<artifacts>/walkthrough.md`，寫法見 [bb-work 的 walkthrough.md](../bb-work/walkthrough.md)）也一樣要涵蓋整個 PR 的 diff。
 PR 已經存在，所以產生骨架時帶 `--pr-url <PR 網址>`，連結直接就是正確的。還沒有這個檔的舊 PR，這次補寫。
 寫完一樣跑 `render` 到 `ok`。
+人工測試指南（`<artifacts>/test-guide.md`，寫法見 [bb-work 的 test-guide.md](../bb-work/test-guide.md)）也一樣涵蓋整個 PR，
+並照它的「bb-fix 更新時」標出這一輪要重測的步驟。還沒有這個檔的舊 PR，這次補寫。
+bb-fix 不為了指南另外補測試：review 沒要求的測試照「寫不了測試」處理。
 UI 有變的話，verifier 重拍 after 截圖（檔名加上輪次，例如 `after-r2-1-xxx.png`）。
 
 ### 5. 更新 PR
@@ -101,7 +104,8 @@ UI 有變的話，verifier 重拍 after 截圖（檔名加上輪次，例如 `af
    並同步更新「✅ 驗收結果」表格為這一輪的結果，以及「📝 程式碼改動範圍」：重新跑一次
    `git diff --stat origin/<base_branch>...HEAD`，反映累積到現在的完整改動，不是只有這一輪；
    逐段改動換成這一輪 reviewer 對照過、`render` 轉出來的 `<artifacts>/walkthrough.rendered.md`
-   （舊 PR 原本的「逐檔案說明」或舊版的逐段改動都由它取代）。
+   （舊 PR 原本的「逐檔案說明」或舊版的逐段改動都由它取代）；
+   「📋 人工測試」換成這一輪 verifier 照做過一遍的 `<artifacts>/test-guide.md`（舊 PR 沒有這一節，就照 [bb-work 的 pr-template.md](../bb-work/pr-template.md) 的位置加上）。
    用 `bb-gh pr edit <PR> --body-file <artifacts>/pr-body.md`（有新截圖就加 `--attach`）。
 3. 對每一個處理過的 review thread 回覆一則「已修正於 `<commit 短 sha>`：<一句話說明>」或「未修改：<理由>」：
    `bb-gh api repos/<owner>/<repo>/pulls/<PR>/comments/<comment id>/replies -f body='...'`
