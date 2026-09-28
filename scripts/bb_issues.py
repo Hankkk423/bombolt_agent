@@ -356,6 +356,7 @@ def cmd_list(args: argparse.Namespace) -> None:
             "message": ev["message"],
             "owner_text": ev["owner_text"],
             "mine": ev["mine"],
+            "fixing": ev["fixing"],
             "open_prs": ev["open_prs"],
             "closed_prs": ev["closed_prs"],
             "assigned": bool(i.get("assignees")),

@@ -1365,6 +1365,19 @@ class TestIssuesList(RepoFixture):
         self.assertIsNone(by_n[14]["local_worktree"])
         self.assertFalse(by_n[14]["blocked"])
 
+    def test_reports_fixing(self):
+        branch = "bb-15-footer"
+        fixing = status_comment({"state": "fixing", "owner": OTHER, "branch": branch, "since": "2026-09-01",
+                                 "session_id": "x", "pr": 7, "history": []}, issue=15)
+        self.gh_data.write_text(json.dumps({
+            "_issues": [{"number": 15, "title": "D", "url": "https://x/15", "assignees": [],
+                         "labels": [{"name": "bombolt"}], "comments": [fixing]}],
+            branch: [{"number": 7, "state": "OPEN", "url": "https://x/pull/7"}],
+        }))
+        out = json.loads(self.run_script("bb_issues.py", "list").stdout)
+        issue = out["issues"][0]
+        self.assertEqual((issue["verdict"], issue["fixing"]), ("in_review", True))
+
 
 ME = {"name": "t", "github": "tester", "machine": "test-mac"}
 OTHER = {"name": "Amy", "github": "amy-gh", "machine": "Amy 的 MacBook"}
