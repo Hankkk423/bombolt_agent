@@ -46,6 +46,14 @@ deny_commands:
 
 {{knowledge}}
 
+## 排查資源（bb-plan 排查問題時用；只能唯讀）
+
+<!-- 排查使用者回報的問題時去哪裡找證據：log 在哪裡、怎麼查（寫得出指令就寫指令）、錯誤追蹤（Sentry 之類）、
+     資料有沒有唯讀的查法、用到的第三方服務的狀態頁。只寫唯讀的方式，並寫明要什麼權限。
+     沒有就寫「無」（排查時只看 code 和使用者給的資訊）。 -->
+
+{{debug_resources}}
+
 ## 開工準備（worktree 建好之後、動手之前）
 
 {{setup}}
@@ -85,6 +93,18 @@ deny_commands:
      沒有這一節的話，PR 的人工測試以本機、照「啟動 app」寫。 -->
 
 {{manual_test}}
+
+## Sandbox（外網測試：使用者在外面用手機測 PR 時用）
+
+<!-- bb-sandbox 用 ngrok 把本機跑起來的 app 開到外網（只有一個網址、一個 port）時要注意什麼：
+     對外開哪個 port：前端透過 dev proxy 呼叫後端（相對路徑 `/api`）的話就是前端的 port；
+     前端直接打 `http://localhost:<後端 port>` 的話，手機上一定壞，寫出來。
+     啟動時要多加的設定，例如 Vite 要允許 tunnel 的網址（`__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=.ngrok-free.app`）；
+     Next.js 16 以上要在 next.config 的 `allowedDevOrigins` 加 `*.ngrok-free.app`（repo 還沒加的話寫出來，外網會被擋）。
+     外網測不了的功能（例如 OAuth 登入的 callback 只登記了 localhost）。
+     沒有可以從外面操作的東西（函式庫、CLI）寫「不適用」。 -->
+
+{{sandbox}}
 
 ## 截圖慣例
 

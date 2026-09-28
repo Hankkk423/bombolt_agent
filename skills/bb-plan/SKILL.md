@@ -1,8 +1,8 @@
 ---
 name: bb-plan
-description: bombolt 流程的第一步。把使用者描述的需求，經過 scope 判斷、網路研究、codebase 探索（以 origin 最新版為準）與完整的選項式訪談，收斂成一份讓另一個 agent 可以不再問人就做完的 GitHub issue。
-when_to_use: 使用者要開始一個新功能／修改並說「bombolt plan」「幫我規劃成 issue」「bb-plan」時。
-argument-hint: "<需求描述>"
+description: bombolt 流程的第一步。把使用者描述的需求，經過 scope 判斷、網路研究、codebase 探索（以 origin 最新版為準）與完整的選項式訪談，收斂成一份讓另一個 agent 可以不再問人就做完的 GitHub issue。也用來排查使用者回報的問題（bug、客訴、異常）：先找出原因，是程式碼的問題才開 fix issue；操作錯誤、第三方服務、資料或設定的問題則給排查報告與處置建議。
+when_to_use: 使用者要開始一個新功能／修改並說「bombolt plan」「幫我規劃成 issue」「bb-plan」時；或要排查問題（「幫我查這個 bug」「客戶說…壞了」「為什麼會…」）時。
+argument-hint: "<需求描述，或要排查的問題>"
 disable-model-invocation: true
 ---
 
@@ -29,6 +29,7 @@ $ARGUMENTS
 - 軟體工程師：先讀懂相關的程式碼再決定做法（第 3 步），選能完整解決需求、改動最小的方案，想清楚資料怎麼流、邊界在哪裡怎麼擋、相容性、可能怎麼壞、怎麼驗證。
 
 這個 session 的唯一產出是**一份 GitHub issue**，開好就結束。
+（排查問題時例外：原因不是程式碼的話，產出是一份排查報告，見 [debug.md](debug.md)。）
 
 ⭐ 最重要的一件事：**實作的是另一個全新的 session，它看不到這次對話。**
 它只能讀 issue、codebase 與 `.claude/bombolt.md`。它在實作中途「停下來問人」被視為規劃失敗——
@@ -80,6 +81,9 @@ $ARGUMENTS
   說用本機的才讀主 checkout 那份），知道這個 repo 的 base branch、閘門、怎麼啟動與登入。之後提到它都指這一份。
 
 ### 1. 用一句話覆述需求
+
+先判斷這是**新需求**，還是**問題回報**（「X 壞了」「客戶說看不到 Y」「為什麼會 Z」：描述的是現象，不是要做什麼）。
+問題回報：覆述你理解的現象，建好快照（第 2 步）之後照 [debug.md](debug.md) 排查，由它決定要不要接著做第 3 步以後。
 
 用一句話說出你理解的需求，以及你認為的「使用者真正想解決的問題」。
 需求本身就有歧義的話（不同理解會做出不同的東西），**這裡就先問**，不要帶著歧義往下走。
@@ -149,6 +153,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/bb_snapshot.py" create
 - DoD 的每一條都要能機械驗證，並寫明驗證方式。專案的驗證閘門一定要列成其中一條。
 - repo 有自動測試框架時，新增或改變的行為要在 DoD 裡要求對應的測試（寫出要測什麼）；沒有的話用瀏覽器操作或指令驗證代替，並說明為什麼。
 - UI 改動一定要有截圖計畫；純後端改動寫「無」並在 DoD 用測試證據代替。
+- 排查出來的 bug：照 [debug.md](debug.md) 寫「🐞 問題與根因」一節（含重現測試的 DoD）；其他 issue 那一節寫「無」。
 - 要限制改動範圍的話，DoD 用 `git diff --stat origin/<base>...HEAD`（三個點：只看這條 branch 自己的改動，base 之後又前進也不受影響）。
 - repo 自己有「收尾規則」（例如每次改動都要更新某份文件、寫決策紀錄）時，逐條決定要列進「要做」還是「⛔ 不做」，並寫出理由——不要讓實作者自己猜。
 - issue 標題照下面第 9 步的格式；commit message 則照 repo 既有的慣例（`.claude/bombolt.md` 的「commit 與 PR 慣例」）。

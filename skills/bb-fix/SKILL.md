@@ -84,6 +84,7 @@ bb-gh api graphql -f query='
 ### 4. 重新驗收
 
 跟 bb-work 的第 7 步完全一樣（閘門 → 更新逐段改動與人工測試指南 → 並行派 `bombolt:bb-verifier` 與 `bombolt:bb-reviewer` → 確認 → 修，最多 3 輪）。
+這個 session 開著 sandbox（`bombolt:bb-sandbox`）的話，派 verifier 之前先照它的第 5 步關掉：verifier 會用同一個 port 啟動 app。
 reviewer 要看的是**整個 PR 的 diff**（`git diff origin/<base>...HEAD`），不只這一輪的改動。
 逐段改動（`<artifacts>/walkthrough.md`，寫法見 [bb-work 的 walkthrough.md](../bb-work/walkthrough.md)）也一樣要涵蓋整個 PR 的 diff。
 PR 已經存在，所以產生骨架時帶 `--pr-url <PR 網址>`，連結直接就是正確的。還沒有這個檔的舊 PR，這次補寫。
@@ -117,6 +118,9 @@ UI 有變的話，verifier 重拍 after 截圖（檔名加上輪次，例如 `af
 ### 6. 回報
 
 告訴使用者：這一輪改了什麼、驗收結果、有哪幾條沒照改以及理由。worktree 與 session 繼續保留。
+
+然後用 AskUserQuestion 問要不要開 sandbox 親手測這一輪（選項：「本機」／「外網（手機也能開）」／「先不用」）。
+要的話用 Skill 工具執行 `bombolt:bb-sandbox`（外網帶 `remote`）。
 
 ---
 

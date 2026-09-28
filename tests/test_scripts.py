@@ -324,6 +324,20 @@ class TestGuard(RepoFixture):
                   "curl http://localhost:8000/health", "gh pr view --json number"]:
             self.assertIsNone(self.bash(c), c)
 
+    def test_tunnel(self):
+        """外網只能經過 bb_sandbox.py：直接開 tunnel 擋下，安裝、查狀態、讀 log 放行。"""
+        for c in ["ngrok http 3012", "/opt/homebrew/bin/ngrok http 3012", "nohup ngrok http 3012 &",
+                  "npm run dev & ngrok http 3012", "ngrok --config x.yml http 3012", 'bash -c "ngrok tcp 22"',
+                  "cloudflared tunnel --url http://localhost:3012"]:
+            self.assertIsNotNone(self.bash(c), c)
+        for c in ['python3 "/x/scripts/bb_sandbox.py" tunnel --port 3012', "python3 /x/scripts/bb_sandbox.py url",
+                  "brew install ngrok", "which ngrok", "pgrep -fl ngrok", "ngrok config add-authtoken abc",
+                  "cat .bombolt/sandbox-tunnel.log", "curl -s http://127.0.0.1:4040/api/endpoints",
+                  "lsof -nP -iTCP:3012 -sTCP:LISTEN", "cloudflared --version",
+                  "curl -s -o /dev/null -w '%{http_code}\\n' -u 'bombolt:pw' https://abc.ngrok-free.dev"]:
+            self.assertIsNone(self.bash(c), c)
+        self.assertIsNone(self.bash("ngrok http 3012", cwd=str(self.repo)))  # worktree 外不管
+
     def test_rm(self):
         self.assertIsNone(self.bash("rm -rf node_modules dist"))
         self.assertIsNone(self.bash("rm -rf /tmp/bombolt-shots"))
@@ -1776,3 +1790,127 @@ class TestPlanCheck(RepoFixture):
         (self.repo / ".claude/bombolt.md").unlink()
         self.assertEqual(self.pc.check_sync(self.repo)["status"], "no_base")
         self.assertIn("bb-setup", self.check())
+
+
+FAKE_NGROK = textwrap.dedent("""\
+    #!{python}
+    # 假的 ngrok：ok 模式在 BB_NGROK_API 開一個假的本機 API；fail 模式寫一行錯誤 log 就結束
+    import http.server, json, os, sys, urllib.parse
+    args = sys.argv[1:]
+    with open(os.environ["FAKE_NGROK_ARGS"], "w") as f:
+        json.dump(args, f)
+    log = args[args.index("--log") + 1]
+    if os.environ.get("FAKE_NGROK_MODE") == "fail":
+        with open(log, "a") as f:
+            f.write(json.dumps({{"lvl": "info", "msg": "ignoring default config path", "err": "stat x: no such file"}}) + "\\n")
+            f.write(json.dumps({{"lvl": "crit", "msg": "command failed", "err": "authentication failed: ERR_NGROK_4018\\r\\n"}}) + "\\n")
+        sys.exit(1)
+    api = urllib.parse.urlparse(os.environ["BB_NGROK_API"])
+    body = json.dumps({{"endpoints": [{{"url": "https://fake.ngrok-free.dev", "upstream": {{"url": "http://localhost:" + args[1]}}}}]}}).encode()
+    class H(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200 if self.path == api.path + "/endpoints" else 404)
+            self.end_headers()
+            self.wfile.write(body)
+        def log_message(self, *a):
+            pass
+    http.server.HTTPServer((api.hostname, api.port), H).serve_forever()
+    """)
+
+
+def free_port():
+    import socket
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+class TestSandbox(RepoFixture):
+    def setUp(self):
+        super().setUp()
+        self.wt = self.create_wt()["path"]
+        stub = self.tmp / "stub-bin"
+        (stub / "ngrok").write_text(FAKE_NGROK.format(python=sys.executable))
+        (stub / "ngrok").chmod(0o755)
+        self.api_port = free_port()
+        self.args_file = self.tmp / "ngrok-args.json"
+        self.env.update(BB_NGROK_API=f"http://127.0.0.1:{self.api_port}/api", FAKE_NGROK_ARGS=str(self.args_file))
+        self.procs = []
+
+    def tearDown(self):
+        for p in self.procs:
+            p.kill()
+            p.communicate()  # 順便關掉 pipe
+        super().tearDown()
+
+    def start_tunnel(self, port=3012, mode="ok"):
+        p = subprocess.Popen([sys.executable, str(SCRIPTS / "bb_sandbox.py"), "tunnel", "--port", str(port)],
+                             cwd=self.wt, env={**self.env, "FAKE_NGROK_MODE": mode},
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.procs.append(p)
+        return p
+
+    def test_tunnel_then_url(self):
+        p = self.start_tunnel()
+        out = json.loads(self.run_script("bb_sandbox.py", "url", "--timeout", "10", cwd=self.wt).stdout)
+        self.assertEqual(out["url"], "https://fake.ngrok-free.dev")
+        self.assertEqual((out["user"], out["port"], out["pid"]), ("bombolt", 3012, p.pid))  # exec 之後 pid 不變
+        self.assertGreaterEqual(len(out["password"]), 16)
+        # ngrok 拿到的 traffic policy 帶著同一組帳密
+        args = json.loads(self.args_file.read_text())
+        self.assertEqual(args[:2], ["http", "3012"])
+        policy = json.loads(Path(args[args.index("--traffic-policy-file") + 1]).read_text())
+        action = policy["on_http_request"][0]["actions"][0]
+        self.assertEqual(action["type"], "basic-auth")
+        self.assertEqual(action["config"]["credentials"], [f"bombolt:{out['password']}"])
+        # 停掉背景工作 ＝ 停掉 ngrok：之後 url 回報沒有在跑
+        p.kill()
+        p.wait()
+        r = self.run_script("bb_sandbox.py", "url", "--timeout", "1", cwd=self.wt, check=False)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("ngrok 沒有在跑", r.stderr)
+
+    def test_new_password_each_time(self):
+        passwords = []
+        for _ in range(2):
+            p = self.start_tunnel()
+            passwords.append(json.loads(self.run_script("bb_sandbox.py", "url", "--timeout", "10", cwd=self.wt).stdout)["password"])
+            p.kill()
+            p.wait()
+        self.assertNotEqual(passwords[0], passwords[1])
+
+    def test_url_reports_ngrok_error(self):
+        p = self.start_tunnel(mode="fail")
+        p.wait()
+        r = self.run_script("bb_sandbox.py", "url", "--timeout", "5", cwd=self.wt, check=False)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("ERR_NGROK_4018", r.stderr)
+        self.assertNotIn("no such file", r.stderr)  # info 行帶的 err 不算錯誤
+
+    def test_refuses_when_ngrok_already_running(self):
+        first = self.start_tunnel(port=3001)
+        state = json.loads(self.run_script("bb_sandbox.py", "url", "--timeout", "10", cwd=self.wt).stdout)
+        second = self.start_tunnel(port=3012)
+        second.wait(timeout=10)
+        self.assertNotEqual(second.returncode, 0)
+        err = second.stderr.read()
+        self.assertIn("已經有一個 ngrok 在跑", err)
+        self.assertIn("https://fake.ngrok-free.dev → http://localhost:3001", err)
+        # 沒有覆寫正在跑的那一個的帳密
+        self.assertEqual(json.loads(self.run_script("bb_sandbox.py", "url", cwd=self.wt).stdout), state)
+        self.assertIsNone(first.poll())
+
+    def test_needs_ngrok_and_worktree(self):
+        no_ngrok = self.tmp / "no-ngrok-bin"
+        no_ngrok.mkdir()
+        (no_ngrok / "git").symlink_to(shutil.which("git"))
+        r = sh([sys.executable, str(SCRIPTS / "bb_sandbox.py"), "tunnel", "--port", "3012"], self.wt,
+               env={**self.env, "PATH": str(no_ngrok)}, check=False)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("brew install ngrok", r.stderr)
+        r = self.run_script("bb_sandbox.py", "tunnel", "--port", "3012", check=False)  # 在主 checkout
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("不在 bombolt 建的 worktree", r.stderr)
+        r = self.run_script("bb_sandbox.py", "url", "--timeout", "1", cwd=self.wt, check=False)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("還沒開過 tunnel", r.stderr)

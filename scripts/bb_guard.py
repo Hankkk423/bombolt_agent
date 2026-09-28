@@ -5,7 +5,7 @@
   A. 任何地方（只要這個資料夾的 git config 設了 github.user）：
      直接呼叫 `gh` 會被擋下，要改用 `bb-gh`——否則 gh 會靜默地用 active 帳號，
      在公司／個人雙帳號的機器上就是用錯帳號開 issue、發 PR。沒設 github.user 就完全不介入。
-  B. 只在「bombolt 建的 worktree」裡（worktree 的 git dir 有 bombolt.json）：下面 1–6。
+  B. 只在「bombolt 建的 worktree」裡（worktree 的 git dir 有 bombolt.json）：下面 1–7。
      使用者自己平常的 session 不受 B 影響。
 
 實作 session 被設計成「完全自主」，所以真正危險的動作不能只靠 prompt 自律，
@@ -21,6 +21,7 @@
   4. 對外發訊息：Slack webhook、LINE、寄信服務的 API
   5. rm -r 到 worktree 與暫存目錄以外的地方
   6. 讀寫秘密檔（.env* 以外的）：私鑰、雲端憑證、專案自訂的秘密檔
+  7. 直接開 tunnel（ngrok、cloudflared）：外網只能經過 bb_sandbox.py，一定帶帳密
 """
 
 from __future__ import annotations
@@ -61,6 +62,12 @@ DEFAULT_DENY_COMMANDS = [
     r"api\.mailgun\.net",
     r"api\.twilio\.com",
     r"\bsendmail\b",
+]
+
+# 直接開 tunnel 會把本機的服務公開到網路上。只擋真的會開 tunnel 的子指令：安裝、看版本、pgrep 都放行。
+TUNNEL_PATTERNS = [
+    r"\bngrok\b[^|;&\n]*\b(http|tcp|tls|start)\b",
+    r"\bcloudflared\b[^|;&\n]*\btunnel\b",
 ]
 
 # .env* 刻意不在這裡：worktree 需要它們才能跑（使用者 2026-09-23 的裁決）。
@@ -298,6 +305,9 @@ def evaluate(payload: Dict[str, Any]) -> Optional[str]:
                 return f"指令符合禁止規則 `{pattern}`（正式環境 / 對外發訊息 / 不可逆的 GitHub 操作）。這類動作要由使用者自己做。"
         except re.error:
             continue
+    if any(re.search(p, command) for p in TUNNEL_PATTERNS):
+        return ("在 bombolt worktree 裡不能直接開 tunnel（會把本機的服務公開到網路上）。"
+                "要給使用者外網測試，照 bb-sandbox 執行 `bb_sandbox.py tunnel`（一定帶帳密）。")
 
     for tokens in split_segments(command):
         head = os.path.basename(tokens[0])

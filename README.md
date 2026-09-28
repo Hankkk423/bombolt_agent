@@ -12,6 +12,7 @@
    scope 判斷（太大就駁回並給拆法）→ 以 origin 最新版探索 codebase → 上網研究
    → 選項式訪談（把會影響寫法的決定全部問完）→ 冷讀 agent 找出「實作者得猜的地方」
    → 開出一份 agent 可以不問人就做完的 GitHub issue          （session 結束）
+   （回報的是 bug：先排查原因，是程式碼的問題才開 fix issue，不是的話給排查報告）
    │
    ▼
 /bombolt:bb-list  ── 隨時查 ──────────────────────────────────────────────────
@@ -29,6 +30,7 @@
    │
    ▼
 你在 GitHub 上 review、照 PR 的「📋 人工測試」測 ── 沒問題 → merge
+（resume 那個 session 說「開 sandbox」：本機或外網網址、測試帳號，帶著你一步一步測）
    │ 有問題                          │ 整個不行
    ▼                                 ▼
 在 PR 留 review comment             關掉 PR（留一句為什麼）→ /bombolt:bb-work <n> 重做
@@ -55,6 +57,7 @@
 | `gh` **≥ 2.99**，並已登入 | issue、PR、PR 附圖（`--attach`） | `brew install gh`，再 `gh auth login` | `gh --version`、`gh auth status` |
 | `python3` ≥ 3.9 | bombolt 的腳本（只用標準函式庫） | macOS 內建 | `python3 --version` |
 | `playwright-cli` | UI 驗收與截圖（專案沒有 UI 可以不裝） | `npm i -g @playwright/cli` | `playwright-cli --version` |
+| `ngrok`，並設好 authtoken | 外網 sandbox（在外面用手機測 PR；不需要可以不裝） | `brew install ngrok`，到 https://dashboard.ngrok.com 註冊，再 `ngrok config add-authtoken <token>` | `ngrok version` |
 
 公司和個人用不同的 GitHub 帳號的話，另外看 [兩個 GitHub 帳號](#公司個人兩個-github-帳號bb-gh)。
 
@@ -67,7 +70,7 @@ claude plugin install bombolt@hankkk423
 
 ### 步驟 3：確認裝好了
 
-重開 Claude Code，輸入 `/bombolt:`，應該看得到 `bb-setup`、`bb-plan`、`bb-work`、`bb-fix`、`bb-list`、`bb-sweep`。
+重開 Claude Code，輸入 `/bombolt:`，應該看得到 `bb-setup`、`bb-plan`、`bb-work`、`bb-fix`、`bb-sandbox`、`bb-list`、`bb-sweep`。
 也可以用 `claude plugin list` 確認 `bombolt@hankkk423` 在清單裡。
 
 ### 更新與移除
@@ -155,6 +158,14 @@ claude
 issue 開好之後，這個 session 就可以結束了。**可以連續規劃多個需求**，每次各開一個 issue；
 之後有空再依序開 session 實作（下一步）。
 
+**排查 bug 也用它**：`/bombolt:bb-plan 客戶說訂單頁看不到上個月的訂單`。它會先補齊症狀、收集證據（code、最近的改動，
+以及 `.claude/bombolt.md`「排查資源」寫的唯讀 log／錯誤追蹤），再判斷原因：
+- 程式碼的 bug → 照一般流程開 `fix` issue（附重現步驟、根因、會先失敗的重現測試），交給 `bb-work` 修。
+- 操作錯誤、第三方服務或網路、資料或設定錯了 → 不開 fix issue，給你排查報告（證據、建議處置、可以回給回報者的話）；
+  程式可以做得更好的話（例如錯誤訊息講清楚），會問你要不要另外開一個改善的 issue。
+
+排查只讀不寫：不改 code、不改資料、不碰正式環境。
+
 想看目前有哪些 issue 可以認領、誰在做：`/bombolt:bb-list`（唯讀）。
 
 ### 2. 實作：開一個**新的** session
@@ -178,6 +189,23 @@ claude -n bb-<repo>-<n>-<slug> --permission-mode auto "/bombolt:bb-work <n>"
 **平行做多個 issue**：對每個 issue 各開一個終端機、各跑一次上面的指令（不同的 `<n>`）。
 每個 worktree 完全隔離，不會互相干擾；`.claude/bombolt.md` 若有寫怎麼隔開 port／資料庫
 （通常用 issue 編號錯開），照著做就不會撞。
+
+### 親手測 PR：開 sandbox
+
+不用自己打指令。resume 那個 PR 的 session（跟下面第 3 步一樣），然後用說的：
+
+| 你說 | 它做 |
+|---|---|
+| 「開 sandbox」 | 在 PR 的 worktree 照 `.claude/bombolt.md` 啟動 app，給你 `http://localhost:<port>` 和測試帳號，列出 PR「📋 人工測試」要你測的步驟 |
+| 「開外網 sandbox」 | 再用 ngrok 開一個臨時網址（每次一組新的帳密），在外面用手機也能測 |
+| 「第 3 步看到 500」 | 當場看 app 的 log 找原因；是 code 的問題就請你跑 `/bombolt:bb-fix` |
+| 「關掉 sandbox」 | 關掉 app 和 tunnel。session 結束也會自動關 |
+
+- 也可以直接打 `/bombolt:bb-sandbox`（外網：`/bombolt:bb-sandbox remote`）。在主 checkout 的 session 帶 issue 編號：`/bombolt:bb-sandbox 12`。
+- `bb-fix` 修完一輪也會問你要不要開 sandbox 測。
+- **在外面**：電腦保持開機、連網、不睡眠，用手機的 Claude app 透過 Remote Control 連回那台電腦上這個 PR 的 session，再說「開外網 sandbox」。
+- 外網一定帶帳密；直接執行 `ngrok`／`cloudflared` 會被安全守門擋下。ngrok 免費方案每個帳號只有一個固定網址，同時只能開一個外網 sandbox。
+- dev server 擋 tunnel 的網址（Vite、Next.js）、前端直接打 `http://localhost:<別的 port>` 這類專案自己的事，寫在 `.claude/bombolt.md` 的「Sandbox（外網測試）」一節（`bb-setup` 會問）。
 
 ### 3. 修改：在 PR 留 review comment，然後
 
@@ -306,6 +334,7 @@ bombolt 所有的 GitHub 操作（開 issue、發 PR、留言、附圖）都經�
 | 對外發訊息 | Slack webhook、LINE、Resend / SendGrid / Mailgun / Twilio |
 | `rm -r` 到 worktree 與暫存目錄以外的地方 | `rm -rf ~`、刪主 checkout 的檔 |
 | 秘密檔（`.env*` 以外） | 私鑰、`~/.aws/credentials`，以及專案設定的 `secret_paths` |
+| 直接開 tunnel（外網只能經過 `bb-sandbox`，一定帶帳密） | `ngrok http 3000`、`cloudflared tunnel --url …` |
 
 每個專案可以在 `.claude/bombolt.md` 追加 `protected_branches`、`deny_commands`、`secret_paths`。
 
@@ -327,11 +356,11 @@ bombolt 所有的 GitHub 操作（開 issue、發 PR、留言、附圖）都經�
 
   ```
   .claude-plugin/          plugin 與 marketplace 的 manifest
-  skills/bb-*/             六個 skill（SKILL.md ＋ 模板）：setup / plan / work / fix / sweep / list
+  skills/bb-*/             七個 skill（SKILL.md ＋ 模板）：setup / plan / work / fix / sandbox / sweep / list
   agents/                  bb-cold-reader、bb-reviewer、bb-verifier
   hooks/hooks.json         安全守門
   bin/bb-gh                依資料夾選 GitHub 帳號的 gh wrapper
-  scripts/                 固定步驟的腳本（worktree、快照、守門、清理），只用 python 標準函式庫
+  scripts/                 固定步驟的腳本（worktree、快照、守門、清理、外網 tunnel），只用 python 標準函式庫
   tests/                   腳本的測試：python3 -m unittest discover -s tests
   example_repo_structure/  使用者的 repo 接上 bombolt 之後會有的檔案（範例）
   ```

@@ -50,6 +50,11 @@ deny_commands:
 - `CLAUDE.md`：程式碼慣例
 - `docs/api.md`：API 規格
 
+## 排查資源（bb-plan 排查問題時用；只能唯讀）
+
+- 正式環境的錯誤：Sentry 的 `myapp` 專案。agent 沒有權限，請使用者貼錯誤的連結或內容。
+- 正式環境的 log 與資料：沒有給 agent 的唯讀方式，請使用者提供發生的時間點與畫面。
+
 ## 開工準備（worktree 建好之後、動手之前）
 
 worktree 是全新的 checkout，沒有 `node_modules`，要自己裝：
@@ -93,6 +98,11 @@ PORT=$((3000 + <issue 編號> % 1000)) DATABASE_URL=file:./.bombolt/dev.db npm r
 ## 人工測試（PR 的「📋 人工測試」用）
 
 在本機測：到 PR 寫的 worktree，照上面「啟動 app」啟動（同一個 port），打開 `http://localhost:<port>`，用 `demo@example.com` 登入。
+
+## Sandbox（外網測試：使用者在外面用手機測 PR 時用）
+
+- 對外開 app 的 port（同「啟動 app」）。前端呼叫 API 都用相對路徑 `/api/...`，同一個 port，手機上也能用。
+- `next.config.js` 已經在 `allowedDevOrigins` 加了 `*.ngrok-free.app`，啟動時不用多加設定。
 
 ## 截圖慣例
 

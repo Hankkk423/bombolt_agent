@@ -228,7 +228,8 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/bb_integrate.py" start --target <branch>
 - issue 上的狀態留言在第 8 步已經改成「審查中」，不用另外留言。
 - **worktree 與 session 都保留**（不要呼叫 ExitWorktree），使用者 review 之後可能要回來修改。
 - 告訴使用者：PR 網址、驗收結果摘要、要他特別看的地方、人工測試有幾步（預計幾分鐘），以及修改的方式：
-  在 PR 留 review comment → 在任何目錄執行 `claude --resume ${CLAUDE_SESSION_ID}`（會自動回到這個 worktree）→ `/bombolt:bb-fix`
+  在 PR 留 review comment → 在任何目錄執行 `claude --resume ${CLAUDE_SESSION_ID}`（會自動回到這個 worktree）→ `/bombolt:bb-fix`。
+  想親手測：resume 之後說「開 sandbox」（在外面說「開外網 sandbox」，會給一個手機也能開的網址）。
 
 ---
 

@@ -36,6 +36,9 @@ argument-hint: "[可選：補充說明]"
 - **正式環境相關指令**（deploy、推環境變數、改正式資料庫的 make target）→ 候選 `deny_commands`。
 - **怎麼啟動服務**：有前端的話怎麼啟動、dev server 的 port、登入流程；純後端的話 API 的 port、怎麼確認服務起來了；
   有 stage 的話，CI/CD 把哪一支部署到哪個網址。
+- **外網 sandbox**：dev server 的設定（Vite 的 `server.allowedHosts`、Next.js 的 `allowedDevOrigins`）、
+  前端怎麼呼叫後端（相對路徑＋dev proxy，還是寫死 `http://localhost:<port>`）→ 推出外網要開哪個 port、啟動時要多加什麼。
+- **排查資源**：有沒有接錯誤追蹤（Sentry 之類）、log 送到哪裡、資料有沒有唯讀的查法 → 候選「排查資源」。
 - **worktree 怎麼裝依賴**：worktree 是全新的 checkout，沒有 `node_modules`、`.venv` 之類。找出在 worktree 裡安裝依賴的指令。
   ⚠️ 不要借用主 checkout 的虛擬環境：editable install（`pip install -e`、workspace link）會讓 worktree 跑到主 checkout 的程式碼。
 - **commit 慣例**：`git log --oneline -30 origin/<base>`，歸納 commit message 的格式（前綴、語言、長度）。
@@ -68,6 +71,8 @@ argument-hint: "[可選：補充說明]"
 6. **額外禁區**：你找到的候選 `secret_paths` / `deny_commands` 要不要擋？還有沒有別的？
 7. **人工測試在哪裡做**：PR 開好之後，使用者 merge 前自己在哪裡測？stage（有 `integration_branches` 時建議：
    網址、部署要多久、怎麼確認 stage 上已經是某個 commit、stage 的測試帳號）還是本機？有沒有每次都要人看的項目？（→「人工測試」一節）
+   本機的話，再問在外面用手機測（外網 sandbox）時要開哪個 port、啟動時要多加什麼，照調查結果給建議（→「Sandbox（外網測試）」一節）。
+8. **排查資源**：排查使用者回報的問題時，agent 可以用什麼**唯讀**的方式看 log、錯誤追蹤、資料？沒有就寫「無」（→「排查資源」一節）。
 
 第 3 步的「忽略清單」與第 4 步的「commit／settings.json」問題，併進最後一輪一起問。
 模板裡其他欄位（專案知識、commit 慣例、截圖慣例）用第 1 步的調查結果填；調查不出來、又會影響實作的，才加進題目問。
