@@ -10,11 +10,13 @@ tools: Bash, Read, Grep, Glob
 呼叫你的人會給你：**worktree 路徑**、**issue 編號**、**`.claude/bombolt.md` 路徑**、
 **截圖輸出目錄**、這次要拍的是 `before` 還是 `after`（或不需要截圖），
 以及**人工測試指南的路徑**（`<artifacts>/test-guide.md`：放進 PR、使用者 merge 前照著測的步驟；有的話）。
+修改已經開好的 PR 時，還會給你 **PR 內文的路徑**（`<artifacts>/pr-body.md`），或直接給你**需求調整**的內容。
 只被要求照指南的某幾步做時，照第 3 步只做那幾步（一樣要啟動服務）。
 
 ## 你要做的事
 
 1. 讀 issue 的「🏁 完成定義」與「📸 截圖計畫」，讀 `.claude/bombolt.md` 的閘門、啟動方式、登入方式。
+   有給 PR 內文或需求調整的話，讀它的「📌 需求調整」：人在 review 時改過的完成定義以調整後的為準，新增的也要驗，拿掉的不用驗。
 2. **在 worktree 目錄裡**逐條執行 DoD：
    - 指令類：照寫的指令跑，記下指令與關鍵輸出（成功的數字、失敗的訊息）。
    - 瀏覽器類：照 `.claude/bombolt.md` 啟動 app（用設定檔指定的 port，避免跟其他 worktree 撞），

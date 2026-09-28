@@ -1,6 +1,6 @@
 ---
 name: bb-work
-description: bombolt 流程的第二步。認領一個由 bb-plan 開好的 GitHub issue，在新的 worktree 裡自主實作，用獨立的驗收者與 reviewer 反覆驗證直到完成定義全部通過，最後發 PR（附 before/after 截圖與 resume 資訊）。
+description: bombolt 流程的第二步。認領一個由 bb-plan 開好的 GitHub issue，在新的 worktree 裡自主實作，用獨立的驗收者與 reviewer 反覆驗證直到完成定義全部通過，最後發 PR（附 before/after 截圖，並在 PR 留下第 1 輪的修改紀錄，任何一台電腦都能接手修改）。
 when_to_use: 使用者說「bombolt work <issue>」「認領 issue #N 開始實作」「bb-work N」時。
 argument-hint: "[issue 編號；留空列出可認領的清單]"
 disable-model-invocation: true
@@ -77,9 +77,13 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/bb_issues.py" status --issue $0
 1. **先問使用者**（AskUserQuestion：「重做」／「先不要」），問題裡說清楚：
    - 被關掉的 PR 有哪幾個（`closed_prs`）。
    - 會刪掉前一次的 worktree、本機 branch、遠端 branch；舊的 commit 都還留在被關掉的 PR 裡。
-2. **讀前一次為什麼被關掉**：對每個被關掉的 PR，跑 bb-fix 第 2 步的兩個指令（`pr view` 後面帶 PR 編號），讀它的留言、review 和 review thread。
+2. **讀前一次為什麼被關掉**：對每個被關掉的 PR，跑 bb-fix 第 2 步的兩個指令（`pr view` 後面帶 PR 編號），讀它的留言、review 和 review thread，
+   以及 `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/bb_pr.py" context --pr <被關掉的 PR 編號>` 的修改紀錄（`records`：做過哪些決定、試過什麼不行）。
    把使用者不滿意的地方整理進 `<artifacts>/progress.md`（第 2 步建好 worktree 之後寫），這次實作要避開。
    PR 上沒有留任何說明的話，照 issue 重做，並在 PR 的「為什麼這樣做」註明「前一次的 PR 沒有留下被關掉的原因」。
+   **需求調整要不要帶過來**：被關掉的 PR 內文有「📌 需求調整」、而且不是「無」→ 逐條列出來，用 AskUserQuestion（multiSelect）問這次重做要沿用哪幾條。
+   沒勾的就回到 issue 原本的需求；勾了的，寫進這次 PR 的「📌 需求調整」（出處寫「沿用被關掉的 #<n>」），
+   並跟 issue 的完成定義一起當成這次的完成標準（第 7 步派 verifier 和 reviewer 時一起給它們）。
 3. **清掉前一次留下的東西**（在主 checkout 執行）：
    ```bash
    python3 "${CLAUDE_PLUGIN_ROOT}/scripts/bb_worktree.py" redo-clean --issue $0 --slug <slug>
@@ -120,7 +124,8 @@ git diff --stat <meta.base_sha> origin/<base>
 - 讀這個 worktree 的設定快照（`bb_worktree.py info` 回傳的 `config_snapshot`），照「開工準備」一節在 worktree 裡安裝依賴等。
   之後提到 `.claude/bombolt.md`（包括給 verifier 的路徑）都指這份快照，不讀主 checkout 那份——使用者可能正在那裡切 branch。
 - 在 `<artifacts>/progress.md` 記錄進度（每完成一步就更新）。這是給 resume 用的：
-  context 被壓縮或 session 重開之後，先讀這個檔就知道做到哪裡。
+  context 被壓縮或 session 重開之後，先讀這個檔就知道做到哪裡。它只在這台電腦上；
+  發 PR 之後換 session、換電腦、換人接手，靠的是 PR 上的修改紀錄（第 10 步）。
 
 ### 5. 拍 before 截圖（只有 `ui: true` 才需要）
 
@@ -153,6 +158,7 @@ git diff --stat <meta.base_sha> origin/<base>
    - `bombolt:bb-reviewer`：看 issue ＋ `git diff origin/<base>...HEAD`，找 blocking 問題，
      並逐段對照 `<artifacts>/walkthrough.md` 跟 code、檢查 `<artifacts>/test-guide.md` 有沒有漏測
      （呼叫時給它這兩個路徑，以及 [coding-style.md](coding-style.md) 的完整路徑）。
+   - 重做時沿用了被關掉的 PR 的需求調整：兩個都要一起給（完成標準是 issue 的完成定義 ＋ 這些調整）。
 4. **不要照單全收**：reviewer 的每一個 blocking 問題你都要自己確認是真的（打開 code、想出失敗情境）。
    確認是真的才修；判斷不是問題的，在 PR 的「請你重點看」說明你為什麼不改。
 5. 有 DoD 沒過、照指南操作發現 code 的問題、或有確認過的 blocking 問題 → 修，然後進下一輪。
@@ -182,10 +188,9 @@ git diff --stat <meta.base_sha> origin/<base>
      連結裡的 `{{PR_URL}}` 保持原樣。
      這一節是讓使用者不用打開 Files changed 就看懂每一段 code 在做什麼。
    - 「📋 人工測試」：貼最後一輪 verifier 照做過一遍的 `<artifacts>/test-guide.md`。
-   - 「🔁 要修改的話」：跑 `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/bb_worktree.py" info`，
-     `owner_text`、`owner_short` 照抄（session 只存在這台電腦，看 PR 的人要知道去哪台電腦 resume）。
-     session 名稱用上面「現況」裡印出的名稱（使用者用 `claude -n` 取的）；查不到就填「（未命名）」。
-     session id 一定要填：`${CLAUDE_SESSION_ID}`。
+   - 「✅ 驗收結果」：註明驗的是哪個 commit（最後一輪 verifier 驗收時的 `HEAD` 短 sha）。
+   - 「📌 需求調整」：寫「無」；重做時沿用了被關掉的 PR 的調整，就列那幾條。
+   - 「🔁 要修改的話」：只照抄 `<!-- bombolt:handoff -->` 這一行，第 10 步的腳本會換成接手的指令、誰在哪台電腦做的。
    - 「🤖 bombolt 回饋」一節誠實填寫——它是整個團隊改進這套流程的唯一資料來源。
 3. 建立 PR（UI 改動附上截圖）。**base 讀 `.claude/bombolt.md` 的 `pr_base`；沒設定就用 `base_branch`**
    （兩者不同時，`git diff` 的範圍比對仍然用 `base_branch`，只有這裡的 PR target 用 `pr_base`）：
@@ -225,11 +230,20 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/bb_integrate.py" start --target <branch>
 
 ### 10. 收尾
 
+- **留下第 1 輪的修改紀錄**（PR 內文都改完之後，最後才做）：照 [bb-fix 的 record.md](../bb-fix/record.md) 寫 `<artifacts>/record.md`：
+  issue 沒寫、實作時自己做的決定與理由，試過但不行的做法，這個 PR 特有的環境的坑，還沒做的事（「為什麼這樣做」已經寫過的不用重複）。然後
+  ```bash
+  python3 "${CLAUDE_PLUGIN_ROOT}/scripts/bb_pr.py" record --pr <PR 編號> --session-id ${CLAUDE_SESSION_ID} \
+    --kind round --summary "發 PR" --body-file <artifacts>/record.md --verified
+  ```
+  🚧 draft PR（驗收沒過）不加 `--verified`。它也會把 PR 內文的「🔁 要修改的話」換成接手的指令、誰在哪台電腦做的。
 - issue 上的狀態留言在第 8 步已經改成「審查中」，不用另外留言。
-- **worktree 與 session 都保留**（不要呼叫 ExitWorktree），使用者 review 之後可能要回來修改。
+- **worktree 與 session 都保留**（不要呼叫 ExitWorktree）。
 - 告訴使用者：PR 網址、驗收結果摘要、要他特別看的地方、人工測試有幾步（預計幾分鐘），以及修改的方式：
-  在 PR 留 review comment → 在任何目錄執行 `claude --resume ${CLAUDE_SESSION_ID}`（會自動回到這個 worktree）→ `/bombolt:bb-fix`。
-  想親手測：resume 之後說「開 sandbox」（在外面說「開外網 sandbox」，會給一個手機也能開的網址）。
+  在 PR 留 review comment → 在任何一台電腦的 repo 主 checkout 開新的 session，執行 `/bombolt:bb-fix <PR 編號>`
+  （會從 PR 上的紀錄接著改，同事也可以；在這台電腦也可以 `claude --resume ${CLAUDE_SESSION_ID}` 回到這個對話，再跑 `/bombolt:bb-fix`）。
+  想親手測：在這個 session 說「開 sandbox」，或在任何一台電腦的新 session 說「開 sandbox <issue 編號>」
+  （在外面說「開外網 sandbox」，會給一個手機也能開的網址）。
 
 ---
 

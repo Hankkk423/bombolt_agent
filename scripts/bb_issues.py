@@ -7,7 +7,8 @@
   bb_issues.py mark --issue N --event <事件> [--branch B] [--session-id S] [--pr <網址或編號>] [--closed-prs 7,9]
                                      更新 issue 上的 bombolt 狀態留言
     事件：claim（開始實作）、redo（前一次的 PR 被關掉，重新實作）、takeover（接手別人做到一半的）、
-          blocked（停工提問）、unblocked（問題回答了，繼續）、pr（發了 PR）、merged（PR merge 了）
+          blocked（停工提問）、unblocked（問題回答了，繼續）、pr（發了 PR）、merged（PR merge 了）、
+          fixing（bb-fix 開始修改 PR，要帶 --pr）、fixed（這一輪修改完成，回到審查中）
 
 狀態記在 issue 上**一則**留言裡，每次原地改寫；結尾的 `<!-- bombolt:status {...} -->` 是給腳本讀的。
 PR 的狀態（開著／關掉／merge）一律即時問 GitHub：用 branch 名 `bb-<issue>-<slug>` 對應，
@@ -42,9 +43,10 @@ STATE_LABEL = {
     "working": "🟡 實作中",
     "blocked": "⛔ 停工提問中",
     "in_review": "🔵 審查中",
+    "fixing": "🟠 修改中",
     "merged": "✅ 已 merge",
 }
-EVENTS = ("claim", "redo", "takeover", "blocked", "unblocked", "pr", "merged")
+EVENTS = ("claim", "redo", "takeover", "blocked", "unblocked", "pr", "merged", "fixing", "fixed")
 
 
 class GhError(RuntimeError):
@@ -146,6 +148,7 @@ def evaluate(number: int, issue_state: str, status: Optional[Dict[str, Any]],
         "owner_text": bb_lib.owner_text(owner) if owner else "",
         "mine": mine,
         "since": since,
+        "fixing": False,
         "open_prs": [{"number": p["number"], "url": p.get("url", "")} for p in by["OPEN"]],
         "closed_prs": [{"number": p["number"], "url": p.get("url", ""), "head": p.get("headRefOid", "")}
                        for p in by["CLOSED"]],
@@ -163,9 +166,11 @@ def evaluate(number: int, issue_state: str, status: Optional[Dict[str, Any]],
             owner = {"github": login} if login else {}
             res.update(owner=owner or None, owner_text=bb_lib.owner_text(owner) if owner else "", mine=False)
         where = "這台電腦" if res["mine"] else (res["owner_text"] or "開 PR 的人的電腦")
-        return {**res, "verdict": "in_review", "message": (
-            f"PR #{pr['number']} 還開著，實作 session 在{where}上。"
-            f"要修改：在那台電腦 resume 那個 session（指令在 PR 最下面），再跑 `/bombolt:bb-fix`。"
+        fixing = state == "fixing"
+        doing = f"{where}上從 {since} 開始在修改" if fixing else f"最近一次在{where}上修改"
+        return {**res, "verdict": "in_review", "fixing": fixing, "message": (
+            f"PR #{pr['number']} 還開著，{doing}。"
+            f"要修改：在任何一台電腦的主 checkout 執行 `/bombolt:bb-fix {pr['number']}`（會讀 PR 上的紀錄接著改）。"
             f"要重做：先關掉 PR #{pr['number']}。")}
     if state in ("working", "blocked"):
         if mine:
@@ -193,13 +198,15 @@ def render_status(data: Dict[str, Any]) -> str:
     owner = data.get("owner") or {}
     branch = data.get("branch", "")
     head = f"🤖 **bombolt 狀態：{STATE_LABEL[state]}**"
-    if state in ("in_review", "merged") and data.get("pr"):
+    if state in ("in_review", "fixing", "merged") and data.get("pr"):
         head += f" — PR #{data['pr']}"
     at = f"實作 session 在 {bb_lib.owner_text(owner)}上"
     detail = {
         "working": f"{at}，正在實作",
         "blocked": f"{at}，等有人回答 issue 留言裡的問題",
-        "in_review": f"{at}，要修改請到那台電腦 resume（指令在 PR 最下面）",
+        "in_review": (f"最近一次在 {bb_lib.owner_text(owner)}上修改。任何一台電腦都能接著改："
+                      f"在主 checkout 執行 `/bombolt:bb-fix {data.get('pr')}`"),
+        "fixing": f"{bb_lib.owner_text(owner)}上從 {data.get('since', '')} 開始在修改",
         "merged": f"PR #{data.get('pr')} 已經 merge",
     }[state]
     if branch and state != "merged":
@@ -248,6 +255,12 @@ def apply_event(prev: Optional[Dict[str, Any]], event: str, me: Dict[str, str], 
         data["state"], line = "working", f"{today} 🟡 問題已回答，繼續實作"
     elif event == "pr":
         data["state"], data["pr"], line = "in_review", pr, f"{today} 🔵 發 PR #{pr}"
+    elif event == "fixing":  # 誰正在改：只是提醒別人，不是鎖（session 當掉就不會清）
+        data["state"], data["owner"], data["since"], data["pr"] = "fixing", me, today, pr or data.get("pr")
+        line = f"{today} 🟠 開始修改 PR #{data['pr']} — {_who(me)}"
+    elif event == "fixed":
+        data["state"], data["owner"], data["pr"] = "in_review", me, pr or data.get("pr")
+        line = f"{today} 🔵 修改完成，等 review — {_who(me)}"
     else:  # merged
         data["state"], data["pr"], line = "merged", pr or data.get("pr"), f"{today} ✅ PR #{pr or data.get('pr')} 已 merge"
     data["history"] = history + [line]
@@ -396,7 +409,7 @@ def main() -> None:
     m.add_argument("--event", required=True, choices=EVENTS)
     m.add_argument("--branch", default="")
     m.add_argument("--session-id", default="")
-    m.add_argument("--pr", default="", help="PR 網址或編號（event 是 pr、merged 時）")
+    m.add_argument("--pr", default="", help="PR 網址或編號（event 是 pr、merged、fixing、fixed 時）")
     m.add_argument("--closed-prs", default="", help="被關掉的 PR 編號，逗號分隔（event 是 redo 時）")
     m.set_defaults(func=cmd_mark)
     args = p.parse_args()

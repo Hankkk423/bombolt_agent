@@ -44,10 +44,11 @@ bb-work 第 7 步、bb-fix 第 4 步都會寫；bb-verifier 會在本機照它�
 
 - **stage**：第一步寫怎麼確認 stage 上已經部署了這個 PR 最新的 commit（寫出短 sha，確認的方法照設定檔），
   接著寫網址、怎麼登入。
-- **本機**：人用 sandbox 開，不用自己打指令。寫：照「🔁 要修改的話」resume 這個 PR 的 session
-  （在外面：用手機的 Claude app 透過 Remote Control 連回那個 session），說「開 sandbox」（本機，`http://localhost:<port>`）
-  或「開外網 sandbox」（有帳密保護的臨時網址，手機也能開），它會給網址與測試帳號，帶著照下面的步驟測；測完說「關掉 sandbox」。
-  自己啟動的方式收進 `<details>`：在哪個目錄（照設定檔；沒寫就 `cd <worktree 路徑>`，它只在實作的那台電腦上）、
+- **本機**：人用 sandbox 開，不用自己打指令。寫：在任何一台電腦的 repo 主 checkout 開一個 Claude Code session
+  （在外面：用手機的 Claude app 透過 Remote Control 連回那台電腦），說「開 sandbox <issue 編號>」（本機，`http://localhost:<port>`）
+  或「開外網 sandbox <issue 編號>」（有帳密保護的臨時網址，手機也能開）。那台電腦還沒有這個 PR 的 worktree 的話，它會先從 PR 建一個；
+  接著給網址與測試帳號，帶著照下面的步驟測；測完說「關掉 sandbox」。
+  自己啟動的方式收進 `<details>`：在哪個目錄（照設定檔；沒寫就 `cd <worktree 路徑>`，每台電腦的 worktree 都在同一個位置）、
   啟動指令（port 之類填好實際的值）、網址、怎麼登入、怎麼關掉。
 - 要先準備的資料（seed、測試帳號、token）也寫在這裡。密碼不寫，寫去哪裡拿。
 
@@ -97,5 +98,5 @@ verifier 會回報每一步實際看到的結果（寫指南時 verifier 還沒�
 
 ## bb-fix 更新時
 
-整份要涵蓋整個 PR 的改動。「要你測的」裡，這次 bb-fix（PR 的「🔄 第 N 輪修改」）會影響到的步驟前面加 🔄（人只要重測這些），
+整份要涵蓋整個 PR 的改動。「要你測的」裡，這一輪 bb-fix 改到的東西會影響到的步驟前面加 🔄（人只要重測這些），
 上一次 bb-fix 留下的 🔄 拿掉，勾選框全部重設成沒勾。

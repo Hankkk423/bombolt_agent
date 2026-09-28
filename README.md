@@ -25,18 +25,18 @@
    → 驗收迴圈：獨立 verifier 啟動服務、逐條跑完成定義、照人工測試步驟實際操作一遍
      ＋ 獨立 reviewer 看 diff（最多 3 輪）
    → 發 PR 到 pr_base（逐段改動：高層次的 Files changed、驗收證據、before/after 截圖、
-     merge 前的人工測試步驟、resume 方式與 session 在誰的電腦）
+     merge 前的人工測試步驟），並在 PR 留下第 1 輪的修改紀錄（誰、哪台電腦、做了哪些決定）
    → 完成定義全過就整合進 stage 這類 integration_branches （worktree 與 session 保留）
    │
    ▼
 你在 GitHub 上 review、照 PR 的「📋 人工測試」測 ── 沒問題 → merge
-（resume 那個 session 說「開 sandbox」：本機或外網網址、測試帳號，帶著你一步一步測）
+（任何一台電腦開 session 說「開 sandbox <n>」：本機或外網網址、測試帳號，帶著你一步一步測）
    │ 有問題                          │ 整個不行
    ▼                                 ▼
 在 PR 留 review comment             關掉 PR（留一句為什麼）→ /bombolt:bb-work <n> 重做
-→ 在開 PR 的那台電腦                   （清掉前一次的 worktree／branch，從最新的 base 重來）
-  claude --resume <id> → /bombolt:bb-fix
-   → 修改 → 重新驗收 → 更新 PR、再整合一次（回到上一步）
+→ 任何一台電腦、新的 session           （清掉前一次的 worktree／branch，從原本的 issue 重來）
+  /bombolt:bb-fix <PR>（同事也可以）
+   → 讀 PR 上的修改紀錄 → 修改 → 重新驗收 → 更新 PR、留下這一輪的紀錄、再整合一次（回到上一步）
    │
    ▼
 /bombolt:bb-sweep  ── 每週一次 ──────────────────────────────────────────────
@@ -182,8 +182,8 @@ claude -n bb-<repo>-<n>-<slug> --permission-mode auto "/bombolt:bb-work <n>"
 它會自己一路做到發 PR 為止，然後告訴你 PR 的網址。**省略 `<n>`** 會改成列出可認領的 issue、
 請你重新指定編號（不會自己選一個開始做）。
 
-開工前它會先看這個 issue 的狀態：別人正在做會問你要不要接手，已經有開著的 PR 就停下來（請開 PR 的人 resume 修改）。
-認領之後，issue 上會有**一則** bombolt 狀態留言，記錄誰在哪台電腦上做、做到哪（實作中 → 審查中 → 已 merge），
+開工前它會先看這個 issue 的狀態：別人正在做會問你要不要接手，已經有開著的 PR 就停下來（要修改請用 `/bombolt:bb-fix <PR>`）。
+認領之後，issue 上會有**一則** bombolt 狀態留言，記錄誰在哪台電腦上做、做到哪（實作中 → 審查中 ⇄ 修改中 → 已 merge），
 每次都是原地改寫，不會洗版。
 
 **平行做多個 issue**：對每個 issue 各開一個終端機、各跑一次上面的指令（不同的 `<n>`）。
@@ -192,7 +192,8 @@ claude -n bb-<repo>-<n>-<slug> --permission-mode auto "/bombolt:bb-work <n>"
 
 ### 親手測 PR：開 sandbox
 
-不用自己打指令。resume 那個 PR 的 session（跟下面第 3 步一樣），然後用說的：
+不用自己打指令。在這個 PR 的 session 裡，或在任何一台電腦的主 checkout 開一個新的 session（這時要帶編號：「開 sandbox 12」；
+那台電腦還沒有這個 PR 的 worktree 會先從 PR 建一個），然後用說的：
 
 | 你說 | 它做 |
 |---|---|
@@ -203,20 +204,28 @@ claude -n bb-<repo>-<n>-<slug> --permission-mode auto "/bombolt:bb-work <n>"
 
 - 也可以直接打 `/bombolt:bb-sandbox`（外網：`/bombolt:bb-sandbox remote`）。在主 checkout 的 session 帶 issue 編號：`/bombolt:bb-sandbox 12`。
 - `bb-fix` 修完一輪也會問你要不要開 sandbox 測。
-- **在外面**：電腦保持開機、連網、不睡眠，用手機的 Claude app 透過 Remote Control 連回那台電腦上這個 PR 的 session，再說「開外網 sandbox」。
+- **在外面**：電腦保持開機、連網、不睡眠，用手機的 Claude app 透過 Remote Control 連回那台電腦上的 session，再說「開外網 sandbox」。
 - 外網一定帶帳密；直接執行 `ngrok`／`cloudflared` 會被安全守門擋下。ngrok 免費方案每個帳號只有一個固定網址，同時只能開一個外網 sandbox。
 - dev server 擋 tunnel 的網址（Vite、Next.js）、前端直接打 `http://localhost:<別的 port>` 這類專案自己的事，寫在 `.claude/bombolt.md` 的「Sandbox（外網測試）」一節（`bb-setup` 會問）。
 
-### 3. 修改：在 PR 留 review comment，然後
+### 3. 修改：在 PR 留 review comment，然後在任何一台電腦
 
 ```bash
-claude --resume <PR 裡寫的 session id>     # 從任何目錄都可以，會自動回到那個 worktree
-> /bombolt:bb-fix
+# 在 repo 的主 checkout（PR 最下面的「🔁 要修改的話」有填好的指令）
+claude -n bb-<repo>-<n>-<slug> --permission-mode auto "/bombolt:bb-fix <PR 編號>"
 ```
 
-session 只存在開 PR 的那台電腦上，PR 最下面的「🔁 要修改的話」會寫是誰的哪台電腦。
-電腦名稱在 macOS 預設是「關於本機」裡的名稱，其他系統是 hostname；想換成好認的名字：
-`git config --global bombolt.machine "小明的公司筆電"`。
+不需要原本的 session，也不需要是原本那台電腦——同事也可以接手，改完再換回你：
+
+- **PR 就是交接本**：每一輪結束時，bb-fix 會在 PR 留一則「🤖 bombolt 紀錄」（預設收合）：為什麼有這一輪、
+  做了哪些決定、試過什麼不行、還有什麼沒做。誰、在哪台電腦、哪段 commit、驗收過沒由腳本自動寫
+  （電腦名稱是 macOS「關於本機」裡的名稱，不用設定）。PR 內文最下面有每一輪一行的修改歷程。
+- **接手**：它會在這台電腦建好（或更新）同一個 worktree，讀 issue、PR 內文、所有修改紀錄和還沒解決的 review，從上一次停下的地方接著改。
+- **需求調整**：review 時決定跟 issue 不一樣的地方（例如「預設改成下個月」）寫在 PR 內文的「📌 需求調整」，**issue 不會被改**：
+  PR 砍掉重做時從原本的需求重來，並問你要沿用哪幾條調整。目標整個變了的話，它會建議你開新的 issue。
+- **以 code 為準**：有人沒用 bombolt、直接 push 的 commit，下一次接手時會補記、重新驗收；紀錄跟 code 對不上時相信 code。
+- **有人正在改**：issue 的狀態會顯示「🟠 修改中」（誰、在哪台電腦）；另一個人再跑 bb-fix 會先問要不要繼續。
+- 在同一台電腦想接回原本的對話也可以：`claude --resume <PR 裡寫的 session id>`，再跑 `/bombolt:bb-fix`。
 
 ### 重做：PR 整個不行，想從頭再來
 
@@ -251,7 +260,7 @@ PR 是 MERGED、本地 tip 等於 PR merge 時的 head、不在受保護名單�
 **reset 做完之後**，在主 checkout 開一個 session 執行 `/bombolt:bb-fix`：把這些 PR（本機還有 worktree 的）
 一次追上最新的 `base_branch`、解決衝突，並重新整合進每個 `integration_branches`。
 已經對齊的會跳過，draft PR 不會被整合。這個模式只做同步，不處理 review。
-- 在某個 PR 的 session 裡跑 `/bombolt:bb-fix`（照 review 修改）時，開工前也會自己檢查一次：
+- 用 `/bombolt:bb-fix <PR>` 修改某個 PR 時，開工前也會自己檢查一次：
   這個 PR 不在 integration branch 裡、或落後 `base_branch`（`pr_base` 不同時），就先同步再修改。
 
 #### PR 開的支跟實際上版的支不同：`pr_base`
@@ -263,7 +272,7 @@ PR 是 MERGED、本地 tip 等於 PR merge 時的 head、不在受保護名單�
 
 `.claude/bombolt.md` 設定 `pr_base`（不設就跟 `base_branch` 一樣）即可啟用這個模式。
 發版後一樣在主 checkout 執行 `/bombolt:bb-fix`；這個模式下它還會把最新的 `base_branch` 合進每個沒上版的 PR。
-- **先合了一個 PR，另一個 PR 就出現 conflict**：`claude --resume <那個 PR 的 session>` → `/bombolt:bb-fix`，
+- **先合了一個 PR，另一個 PR 就出現 conflict**：`/bombolt:bb-fix <那個 PR>`，
   它會把最新的 `pr_base` 合進來、解衝突、跑閘門、push，並在 PR 留言列出「這個 PR 現在也包含了哪些 PR」
   （之後若決定某個 PR 這波不上，就知道哪些 PR 已經帶著它）。
 
@@ -360,7 +369,7 @@ bombolt 所有的 GitHub 操作（開 issue、發 PR、留言、附圖）都經�
   agents/                  bb-cold-reader、bb-reviewer、bb-verifier
   hooks/hooks.json         安全守門
   bin/bb-gh                依資料夾選 GitHub 帳號的 gh wrapper
-  scripts/                 固定步驟的腳本（worktree、快照、守門、清理、外網 tunnel），只用 python 標準函式庫
+  scripts/                 固定步驟的腳本（worktree、快照、守門、清理、外網 tunnel、PR 修改紀錄），只用 python 標準函式庫
   tests/                   腳本的測試：python3 -m unittest discover -s tests
   example_repo_structure/  使用者的 repo 接上 bombolt 之後會有的檔案（範例）
   ```

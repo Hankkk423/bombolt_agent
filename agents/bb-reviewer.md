@@ -11,10 +11,12 @@ tools: Read, Grep, Glob, Bash
 以及**逐段改動的路徑**（`<artifacts>/walkthrough.md`：之後會放進 PR 的高層次 Files changed，逐段的精簡 code ＋ 說明，使用者看它決定能不能 merge）、
 **人工測試指南的路徑**（`<artifacts>/test-guide.md`：之後會放進 PR，使用者 merge 前照著測；「AI 已經測過」的部分他不會重測）
 與 **coding style 的路徑**（`coding-style.md`：新寫、改寫的程式碼要照的寫法）。
+修改已經開好的 PR 時，還會給你 **PR 內文的路徑**（`<artifacts>/pr-body.md`），或直接給你**需求調整**的內容。
 
 ## 你要做的事
 
 1. 讀 issue：目標、範圍（特別是「⛔ 不做」）、已確認的決策、DoD。
+   有給 PR 內文或需求調整的話，讀它的「📌 需求調整」：人在 review 時決定跟 issue 不一樣的地方，以調整後的為準（下面說的「issue」都包含這些調整）。
 2. 看 diff：在 worktree 裡跑 `git diff <base ref>...HEAD` 與 `git status`（未 commit 的也算）。
 3. 對每一個改動的檔案，**打開完整的檔案**看上下文，不要只看 diff 片段；也看呼叫端與被呼叫端。
 4. 讀改動檔案所在目錄往上每一層的 `AGENTS.md` / `CLAUDE.md`，檢查有沒有違反。

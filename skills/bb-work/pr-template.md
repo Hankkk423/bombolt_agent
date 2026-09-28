@@ -1,6 +1,8 @@
 <!--
 bombolt PR 模板。讀者是要決定能不能 merge 的人：重點、不廢話、證據優先。
 沒有內容的段落寫「無」，不要刪掉。
+「🔁 要修改的話」只照抄 `<!-- bombolt:handoff -->` 這一行，不要自己寫：`bb_pr.py record` 會把它換成接手的指令、
+最近一次是誰在哪台電腦改的、每一輪的修改歷程。
 -->
 
 ## 一句話
@@ -46,7 +48,18 @@ bombolt PR 模板。讀者是要決定能不能 merge 的人：重點、不廢�
 
 {{關鍵決策與理由，連回 issue；issue 沒寫、實作時自己做的判斷要特別標出來}}
 
-## ✅ 驗收結果（對照 #{{issue}} 的完成定義）
+## 📌 需求調整（相對於 #{{issue}}）
+
+{{review 時由人決定、跟 issue 不一樣的地方（bb-fix 會寫）。issue 保持原樣：PR 砍掉重做時從原本的需求重來。
+驗收以「issue 的完成定義 ＋ 這裡的調整」為準。bb-work 發 PR 時寫「無」（重做時沿用舊 PR 的調整除外）。同一件事再調整時改那一條，不要疊新的。}}
+
+| # | 調整 | 影響的完成定義 | 誰決定、出處 |
+|---|---|---|---|
+| 1 | {{預設顯示下個月（原本：這個月）}} | {{DoD 2 改為：…／新增：…／拿掉 DoD 4}} | {{名字，YYYY-MM-DD，[review](留言連結)／在 session 裡說的／沿用被關掉的 #n}} |
+
+## ✅ 驗收結果（對照 #{{issue}} 的完成定義 ＋ 📌 需求調整）
+
+驗的是 `{{這一輪 verifier 驗收時的 commit 短 sha}}`
 
 | # | 條件 | 結果 | 證據 |
 |---|---|---|---|
@@ -72,20 +85,7 @@ bombolt PR 模板。讀者是要決定能不能 merge 的人：重點、不廢�
 
 ## 🔁 要修改的話
 
-實作 session 在 {{owner_text}}上，只有那台電腦能接著修改。
-
-| | |
-|---|---|
-| worktree | `{{worktree 路徑}}`（那台電腦上） |
-| branch | `{{branch}}` |
-| session | `{{session 名稱，如 bb-myapp-12-booking-month-default}}` · id `{{session id}}` |
-
-在這個 PR 留 review comment，然後由 {{owner_short}} 在那台電腦的任何目錄執行（會自動回到上面那個 worktree）：
-
-```bash
-claude --resume {{session id}}
-# 回到 session 之後輸入：/bombolt:bb-fix
-```
+<!-- bombolt:handoff -->
 
 <details>
 <summary>🤖 bombolt 回饋（給 pipeline 迭代用）</summary>

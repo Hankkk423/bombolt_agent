@@ -3,6 +3,9 @@
 
 用法：
   bb_worktree.py create --issue 12 --slug bookings-default-month --session-id <uuid>
+  bb_worktree.py pickup --pr <PR 或 issue 編號> --session-id <uuid>
+      接手一個開著的 PR（bb-fix 開工時）：這台電腦沒有它的 worktree 就從 origin 上的 branch 建一個；
+      已經有就 fast-forward 到 origin。本機有沒 push 的 commit（ahead）、或跟 origin 分岔時停下來說明。
   bb_worktree.py info [--path <worktree>]            metadata ＋ artifacts 路徑 ＋ 這台電腦是誰的（owner）
   bb_worktree.py redo-clean --issue 12 --slug bookings-default-month
       重做前清掉前一次的 worktree、本地 branch、遠端 branch（前一次的 PR 必須已經關閉、沒有 merge）
@@ -33,6 +36,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import bb_issues  # noqa: E402
 import bb_lib  # noqa: E402
+import bb_pr  # noqa: E402
 import bb_sweep  # noqa: E402
 
 SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
@@ -41,6 +45,24 @@ SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 def fail(msg: str) -> None:
     print(f"bombolt: {msg}", file=sys.stderr)
     sys.exit(1)
+
+
+def copy_files(repo: Path, path: Path, cfg: dict) -> tuple:
+    """把設定檔 copy_files 列的 .env 類檔案從主 checkout 複製到 worktree。回傳 (複製了的, 跳過的＋原因)。"""
+    copied, skipped = [], []
+    for rel in cfg.get("copy_files", []):
+        src = repo / rel
+        if not src.is_file():
+            skipped.append(f"{rel}（主 checkout 沒有這個檔）")
+            continue
+        if not bb_lib.git_ok(["check-ignore", "-q", rel], repo):
+            skipped.append(f"{rel}（沒被 gitignore，拒絕複製以免被 commit）")
+            continue
+        dst = path / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
+        copied.append(rel)
+    return copied, skipped
 
 
 def cmd_create(args: argparse.Namespace) -> None:
@@ -91,20 +113,7 @@ def cmd_create(args: argparse.Namespace) -> None:
     except RuntimeError as e:
         fail(f"建立 worktree 失敗：{e}")
 
-    copied, skipped = [], []
-    for rel in cfg.get("copy_files", []):
-        src = repo / rel
-        if not src.is_file():
-            skipped.append(f"{rel}（主 checkout 沒有這個檔）")
-            continue
-        if not bb_lib.git_ok(["check-ignore", "-q", rel], repo):
-            skipped.append(f"{rel}（沒被 gitignore，拒絕複製以免被 commit）")
-            continue
-        dst = path / rel
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(src, dst)
-        copied.append(rel)
-
+    copied, skipped = copy_files(repo, path, cfg)
     meta = {
         "tool": "bombolt",
         "issue": args.issue,
@@ -125,6 +134,103 @@ def cmd_create(args: argparse.Namespace) -> None:
                      ensure_ascii=False))
 
 
+def cmd_pickup(args: argparse.Namespace) -> None:
+    """接手一個開著的 PR：worktree 跟 branch 同名、放在同一個位置，所以哪一台電腦接手都長一樣。"""
+    repo = bb_lib.main_checkout(Path.cwd())
+    if repo is None:
+        fail("目前目錄不在 git repo 裡。")
+    try:
+        pr = bb_pr.resolve(repo, args.pr)
+    except bb_issues.GhError as e:
+        fail(str(e))
+    if pr.get("state") != "OPEN":
+        fail(f"PR #{pr['number']} 不是開著的（{pr.get('state')}），沒有要接手的。要重做請跑 /bombolt:bb-work {pr['issue']}。")
+    first = bb_lib.base_config(repo)
+    if first["config"] is None:
+        fail(f"{first['source']}，請先執行 /bombolt:bb-setup。")
+    base = first["config"].get("base_branch")
+    if not base:
+        fail(f"{bb_lib.CONFIG_REL} 沒有設定 base_branch。")
+    name, remote = pr["headRefName"], f"origin/{pr['headRefName']}"
+    path = repo / bb_lib.WORKTREES_REL / name
+    try:
+        bb_lib.git(["fetch", "--quiet", "origin", base, name], repo)
+    except RuntimeError as e:
+        fail(f"fetch 失敗：{e}")
+
+    def count(rng: str) -> int:
+        return int(bb_lib.git(["rev-list", "--count", rng], repo) or 0)
+
+    local = bb_lib.git(["rev-parse", "--verify", "--quiet", f"refs/heads/{name}"], repo, check=False).strip()
+    ahead = count(f"{remote}..{name}") if local else 0
+    behind = count(f"{name}..{remote}") if local else 0
+    if ahead and behind:
+        fail(f"本機的 `{name}` 跟 origin 分岔了（本機多 {ahead} 個、origin 多 {behind} 個 commit）。"
+             f"不會自動合併：先看兩邊各改了什麼（git log {remote}...{name}），跟使用者確認怎麼處理。")
+
+    bb_lib.ensure_local_exclude(repo, f"/{bb_lib.WORKTREES_REL}/")
+    bb_lib.ensure_local_exclude(repo, f"/{bb_lib.ARTIFACTS_DIR}/")
+    created, copied, skipped, source = not path.exists(), [], [], ""
+    if not created:
+        meta = bb_lib.read_meta(path)
+        if meta is None:
+            fail(f"{path} 已存在但不是 bombolt 建的 worktree，請手動確認。")
+        if bb_lib.git(["status", "--porcelain"], path).strip():
+            fail(f"{path} 有未 commit 的檔案（之前在這台電腦改到一半？）。先確認要不要留（git -C {path} status），再接手。")
+        if args.session_id and meta.get("session_id") != args.session_id:
+            meta.setdefault("previous_session_ids", []).append(meta.get("session_id"))
+            meta["session_id"] = args.session_id
+            bb_lib.write_meta(path, meta)
+    else:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            if local:  # worktree 被刪了、branch 還在（例如之前在這台做過）：沿用 branch，下面再追上 origin
+                bb_lib.git(["worktree", "add", str(path), name], repo)
+            else:
+                bb_lib.git(["worktree", "add", "--track", "-b", name, str(path), remote], repo)
+        except RuntimeError as e:
+            fail(f"建立 worktree 失敗：{e}")
+        chosen = bb_lib.base_config(repo)  # fetch 之後的：origin 上最新的設定
+        copied, skipped = copy_files(repo, path, chosen["config"])
+        source = chosen["source"]
+        meta = {
+            "tool": "bombolt",
+            "issue": pr["issue"],
+            "name": name,
+            "branch": name,
+            "base": base,
+            "base_sha": bb_lib.git(["rev-parse", f"origin/{base}"], repo),
+            "repo": str(repo),
+            "path": str(path),
+            "session_id": args.session_id,
+            "created_at": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"),
+            "picked_up_pr": pr["number"],
+        }
+        bb_lib.write_meta(path, meta)
+        bb_lib.snapshot_config(path, chosen["text"])
+    if behind:
+        try:
+            bb_lib.git(["merge", "--ff-only", "--quiet", remote], path)
+        except RuntimeError as e:
+            fail(f"fast-forward 到 {remote} 失敗：{e}")
+    bb_lib.git(["branch", "--quiet", f"--set-upstream-to={remote}", name], repo, check=False)  # 之後 git push 推回同一支
+
+    if ahead:
+        status = "ahead"
+        message = (f"本機的 `{name}` 有 {ahead} 個還沒 push 的 commit（之前在這台電腦改的，沒有進 PR）："
+                   f"給使用者看 `git log {remote}..HEAD`，問要併進這一輪，還是先停下來。")
+    elif created:
+        status, message = "created", f"從 {remote} 建好 worktree。"
+    elif behind:
+        status, message = "updated", f"fast-forward 了 {behind} 個 commit（別的電腦或別人 push 的）。"
+    else:
+        status, message = "exists", "這台電腦的 worktree 已經是最新的。"
+    print(json.dumps({"status": status, "message": message, "pr": pr["number"], "issue": pr["issue"],
+                      "branch": name, "path": str(path), "pulled": behind, "ahead": ahead,
+                      "artifacts": str(bb_lib.artifacts_dir(path)), "copied": copied, "skipped": skipped,
+                      "config_source": source}, ensure_ascii=False))
+
+
 def cmd_info(args: argparse.Namespace) -> None:
     target = Path(args.path) if args.path else Path.cwd()
     meta = bb_lib.read_meta(target)
@@ -135,7 +241,7 @@ def cmd_info(args: argparse.Namespace) -> None:
     meta["session_name"] = bb_lib.session_name(meta.get("session_id", ""))
     owner = bb_lib.owner_info(target)
     meta["owner"] = owner
-    meta["owner_text"] = bb_lib.owner_text(owner)    # PR「🔁 要修改的話」照抄
+    meta["owner_text"] = bb_lib.owner_text(owner)    # 給人看的：誰、哪台電腦
     meta["owner_short"] = bb_lib.owner_short(owner)
     print(json.dumps(meta, ensure_ascii=False))
 
@@ -253,6 +359,10 @@ def main() -> None:
     c.add_argument("--session-id", default="")
     c.add_argument("--base", default="", help="覆寫設定檔的 base_branch（通常不需要）")
     c.set_defaults(func=cmd_create)
+    k = sub.add_parser("pickup")
+    k.add_argument("--pr", required=True, type=int, help="PR 或 issue 編號")
+    k.add_argument("--session-id", default="")
+    k.set_defaults(func=cmd_pickup)
     i = sub.add_parser("info")
     i.add_argument("--path", default="")
     i.set_defaults(func=cmd_info)

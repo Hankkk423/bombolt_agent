@@ -2,7 +2,7 @@
 name: bb-sandbox
 description: 在某個 PR 的 worktree 把 app 跑起來給使用者親手測：本機（localhost），或外網（ngrok 臨時網址，有帳密保護，在外面用手機也能測）。給網址和測試帳號，帶著 PR 的「📋 人工測試」一步一步測，測到問題當場看 log 找原因。測完關掉，session 結束也會自動關。
 when_to_use: 使用者說「開 sandbox」「開環境給我測」「我要測這個 PR」「開外網 sandbox」「給我手機能開的網址」「關掉 sandbox」時；bb-fix 做完一輪、使用者說要測時。
-argument-hint: "[remote｜stop] [issue 編號]"
+argument-hint: "[remote｜stop] [issue 或 PR 編號]"
 ---
 
 # bb-sandbox：開環境給使用者親手測 PR
@@ -36,8 +36,14 @@ argument-hint: "[remote｜stop] [issue 編號]"
 
 - 「現況」顯示目前在 bombolt worktree → 就是它。
 - 顯示「這個 session 是 worktree `…` 的實作 session」→ 用 **EnterWorktree** 帶那個 `path` 進去。
-- 在主 checkout、使用者有給 issue 編號 → `ls -d <主 checkout>/.claude/worktrees/bb-<n>-*`，用 **EnterWorktree** 進去。
-- 都找不到（沒給編號、已經被 bb-sweep 清掉、PR 是在別台電腦做的）→ 告訴使用者原因，結束。
+- 在主 checkout、使用者有給編號（issue 或 PR）→ 找到或建好這台電腦上的 worktree（PR 是在別台電腦做的、或被 bb-sweep 清掉了，
+  會從 PR 的 branch 建一個；已經有就 fast-forward 到 origin，測的才是 PR 最新的樣子；不會改 PR）：
+  ```bash
+  python3 "${CLAUDE_PLUGIN_ROOT}/scripts/bb_worktree.py" pickup --pr <編號> --session-id ${CLAUDE_SESSION_ID}
+  ```
+  用 **EnterWorktree** 帶回傳的 `path` 進去。`status` 是 `created` 的話，先照設定檔的「開工準備」安裝依賴。
+  `ahead`（這台有沒 push 的 commit）→ 告訴使用者 sandbox 會包含這些還沒進 PR 的改動，問要不要照樣開。失敗 → 把訊息給使用者看，結束。
+- 沒給編號、又不在 worktree 裡 → 請使用者說要測哪一個（issue 或 PR 編號），結束。
 
 跑 `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/bb_worktree.py" info`，讀它的 `config_snapshot`（之後說的「設定檔」都指這份）
 與 `<artifacts>/test-guide.md`（PR 的「📋 人工測試」）。
@@ -88,6 +94,8 @@ argument-hint: "[remote｜stop] [issue 編號]"
 - 回報某一步不對 → 先看 app 的 log（背景工作的輸出），需要的話自己照那一步操作一次，找出原因，
   告訴使用者是 code、測試指南、環境還是操作的問題，附上證據。
 - 是 code 的問題 → 請使用者執行 `/bombolt:bb-fix <看到的問題>`（在這個 session 說的也算修改意見；bb-fix 驗收前會先關掉 sandbox）。
+- 使用者測完做了不用改 code、但會影響之後怎麼改的決定（例如「這個行為維持原樣」）→ 當下用 `bb_pr.py note` 記在 PR 上
+  （見 [bb-fix 的 record.md](../bb-fix/record.md)），換一個 session 或換電腦接手的人才看得到。
 
 ### 5. 關掉
 

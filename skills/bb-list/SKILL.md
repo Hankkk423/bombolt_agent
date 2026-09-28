@@ -15,7 +15,7 @@ argument-hint: ""
 - `free` → 「🟢 可認領」
 - `working` → 「🟡 實作中」＋ `owner_text`（誰、哪台電腦）；`mine: true` 寫「🟡 這台電腦在做」
 - `blocked` → 「⛔ 卡在停工提問，需要先回答 issue 上的問題」
-- `in_review` → 「🔵 PR #n 審查中」＋ `owner_text`
+- `in_review` → 「🔵 PR #n 審查中」；`fixing: true` 的寫「🟠 PR #n 修改中」＋ `owner_text`（誰、在哪台電腦改）
 - `redo` → 「🔁 前一次的 PR #n 已關閉，可以重做」
 - `merged` → 「✅ PR 已 merge，等 `/bombolt:bb-sweep` 關閉 issue」
 
@@ -23,3 +23,4 @@ argument-hint: ""
 
 **只列出、不要自動開始做任何一個。** 要認領（或重做）某個 issue，請使用者另外開一個新 session 執行
 `/bombolt:bb-work <n>`——每個 issue 一個獨立的 session／worktree，可以同時開好幾個平行做。
+要修改已經開好的 PR：在任何一台電腦開一個新 session 執行 `/bombolt:bb-fix <PR 或 issue 編號>`。

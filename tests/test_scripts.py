@@ -23,6 +23,7 @@ sys.path.insert(0, str(SCRIPTS))
 import bb_guard  # noqa: E402
 import bb_issues  # noqa: E402
 import bb_lib  # noqa: E402
+import bb_pr  # noqa: E402
 import bb_walkthrough  # noqa: E402
 
 CONFIG = textwrap.dedent("""\
@@ -382,6 +383,26 @@ FAKE_GH = textwrap.dedent("""\
         sys.exit(1)
     def save():
         json.dump(data, open(os.environ["FAKE_GH_DATA"], "w"), ensure_ascii=False)
+    if args[:2] == ["pr", "view"]:
+        pr = data.get("_pr:" + args[2])
+        if pr is None:
+            print("no pull requests found", file=sys.stderr)
+            sys.exit(1)
+        print(json.dumps(pr))
+        sys.exit(0)
+    if args[:2] == ["pr", "comment"]:
+        pr = data["_pr:" + args[2]]
+        n = data.get("_next_comment_id", 1000)
+        url = f"https://github.com/o/r/pull/{args[2]}#issuecomment-{n}"
+        pr.setdefault("comments", []).append({"url": url, "body": open(args[args.index("--body-file") + 1]).read()})
+        data["_next_comment_id"] = n + 1
+        save()
+        print(url)
+        sys.exit(0)
+    if args[:2] == ["pr", "edit"]:
+        data["_pr:" + args[2]]["body"] = open(args[args.index("--body-file") + 1]).read()
+        save()
+        sys.exit(0)
     if args[:2] == ["pr", "list"]:
         if "--head" in args:
             prs = data.get(args[args.index("--head") + 1], [])
@@ -418,7 +439,7 @@ FAKE_GH = textwrap.dedent("""\
         cid = [a for a in args if a.startswith("repos/")][0].rsplit("/", 1)[1]
         body = json.load(open(args[args.index("--input") + 1]))["body"]
         for k, issue in data.items():
-            for c in (issue.get("comments", []) if k.startswith("_issue:") else []):
+            for c in (issue.get("comments", []) if k.startswith(("_issue:", "_pr:")) else []):
                 if c["url"].endswith("#issuecomment-" + cid):
                     c["body"] = body
                     save()
@@ -1488,6 +1509,34 @@ class TestIssueStatus(RepoFixture):
         self.assertIn("PR #7 已關閉（沒有 merge），重新實作", data["history"][2])
         self.assertEqual(self.issues("status", "--issue", "3")["verdict"], "mine")
 
+    def test_fixing_and_fixed(self):
+        # bb-fix 開工：狀態改成「修改中」（只是提醒，不擋）；做完一輪回到「審查中」，PR 編號留著
+        self.set_data({"_issue:3": bb_issue(3, "x"), "bb-3-x": [self.pr(7, "OPEN")]})
+        self.issues("mark", "--issue", "3", "--event", "claim", "--branch", "bb-3-x", "--session-id", "s1")
+        self.issues("mark", "--issue", "3", "--event", "pr", "--pr", "7")
+        self.issues("mark", "--issue", "3", "--event", "fixing", "--pr", "7", "--session-id", "s2")
+        comments = self.data()["_issue:3"]["comments"]
+        self.assertEqual(len(comments), 1)
+        self.assertIn("🟠 修改中** — PR #7", comments[0]["body"])
+        data, _ = bb_issues.find_status(comments)
+        self.assertEqual((data["state"], data["pr"], data["session_id"]), ("fixing", 7, "s2"))
+        self.assertIn("開始修改 PR #7", data["history"][-1])
+        st = self.issues("status", "--issue", "3")
+        self.assertEqual((st["verdict"], st["fixing"]), ("in_review", True))  # bb-work 一樣停下來
+        self.assertIn("開始在修改", st["message"])
+
+        self.issues("mark", "--issue", "3", "--event", "fixed", "--pr", "7")
+        data, _ = bb_issues.find_status(self.data()["_issue:3"]["comments"])
+        self.assertEqual((data["state"], data["pr"]), ("in_review", 7))
+        self.assertIn("修改完成", data["history"][-1])
+        st = self.issues("status", "--issue", "3")
+        self.assertEqual((st["verdict"], st["fixing"]), ("in_review", False))
+        self.assertIn("最近一次在這台電腦上修改", st["message"])
+        self.assertIn("/bombolt:bb-fix 7", st["message"])
+        body = self.data()["_issue:3"]["comments"][0]["body"]
+        self.assertIn("任何一台電腦都能接著改", body)
+        self.assertNotIn("resume", body)
+
     def test_patch_failure_adds_new_comment(self):
         old = status_comment({"state": "working", "owner": OTHER, "branch": "bb-3-x", "since": "d", "history": []})
         self.set_data({"_issue:3": bb_issue(3, "x", comments=[old]), "_patch_fails": True})
@@ -1528,6 +1577,325 @@ class TestIssueStatus(RepoFixture):
         p = self.run_script("bb_issues.py", "list")
         self.assertEqual(p.returncode, 0)
         self.assertEqual(json.loads(p.stdout)["status"], "error")
+
+
+PR_BODY = textwrap.dedent("""\
+    ## 一句話
+
+    改了預設月份
+
+    ## 🔁 要修改的話
+
+    <!-- bombolt:handoff -->
+
+    <details>
+    <summary>🤖 bombolt 回饋（給 pipeline 迭代用）</summary>
+
+    - 驗收迴圈跑了幾輪：1
+
+    </details>
+
+    Closes #12
+    """)
+
+
+class HandoffFixture(RepoFixture):
+    """一個開著的 PR #7（issue 12、branch bb-12-bookings-default-month），主 checkout 那台叫 test-mac。"""
+
+    def setUp(self):
+        super().setUp()
+        bindir = self.tmp / "bin"
+        bindir.mkdir()
+        (bindir / "gh").write_text(FAKE_GH)
+        (bindir / "gh").chmod(0o755)
+        self.gh_data = self.tmp / "gh.json"
+        self.gh_data.write_text("{}")
+        self.env = {**os.environ, "PATH": f"{bindir}:{os.environ['PATH']}", "FAKE_GH_DATA": str(self.gh_data)}
+        self.info = self.create_wt(sid="sess-1")
+        self.branch = self.info["branch"]
+        self.wt = Path(self.info["path"])
+        self.commit(self.wt, "feature.txt", "feat\n", "feat work")
+        sh(["git", "push", "-q", "-u", "origin", self.branch], self.wt)
+        pr = {"number": 7, "url": "https://github.com/o/r/pull/7", "title": "feat: x (#12)", "state": "OPEN",
+              "isDraft": False, "headRefName": self.branch, "headRefOid": self.tip(), "baseRefName": "prod",
+              "body": PR_BODY, "comments": []}
+        self.gh_data.write_text(json.dumps({
+            "_pr:7": pr, "_issue:12": bb_issue(12, "bookings-default-month"),
+            self.branch: [{"number": 7, "state": "OPEN", "url": pr["url"], "headRefOid": pr["headRefOid"]}],
+        }, ensure_ascii=False))
+
+    def data(self):
+        return json.loads(self.gh_data.read_text())
+
+    def update(self, key, **kw):
+        d = self.data()
+        d[key].update(kw)
+        self.gh_data.write_text(json.dumps(d, ensure_ascii=False))
+
+    def commit(self, where, fname, content, msg, author=None):
+        (Path(where) / fname).write_text(content)
+        sh(["git", "add", "-A"], where)
+        who = ["-c", f"user.name={author}", "-c", "user.email=a@b"] if author else []
+        sh(["git", *who, "commit", "-qm", msg], where)
+
+    def tip(self):
+        return sh(["git", "ls-remote", "origin", f"refs/heads/{self.branch}"], self.repo).stdout.split()[0]
+
+    def bbpr(self, *args, cwd=None, check=True):
+        p = self.run_script("bb_pr.py", *args, cwd=cwd or self.wt, check=check)
+        return json.loads(p.stdout) if p.returncode == 0 else p
+
+    def record(self, sid, kind="round", summary="發 PR", text="**決定**\n- 用 X 不用 Y", verified=True, cwd=None,
+               check=True):
+        f = self.tmp / f"record-{sid}-{kind}.md"
+        f.write_text(text)
+        return self.bbpr("record", "--pr", "7", "--session-id", sid, "--kind", kind, "--summary", summary,
+                         "--body-file", str(f), *(["--verified"] if verified else []), cwd=cwd, check=check)
+
+    def comments(self):
+        return self.data()["_pr:7"]["comments"]
+
+    def body(self):
+        return self.data()["_pr:7"]["body"]
+
+    def coworker_push(self, fname="co.txt", author="Amy"):
+        other = self.tmp / "coworker"
+        if not other.exists():
+            sh(["git", "clone", "-q", "-b", self.branch, str(self.origin), str(other)], self.tmp)
+        sh(["git", "pull", "-q", "origin", self.branch], other)
+        self.commit(other, fname, "co\n", "coworker tweak", author=author)
+        sh(["git", "push", "-q", "origin", f"HEAD:{self.branch}"], other)
+
+
+class TestPrHandoff(HandoffFixture):
+    """bb_pr.py：PR 是交接本——修改紀錄（PR 留言）、「🔁 要修改的話」、接手時要知道的事。"""
+
+    def test_first_record_and_handoff_section(self):
+        r = self.record("sess-1")
+        self.assertEqual((r["status"], r["n"], r["updated"], r["commits"]), ("ok", 1, False, 1))
+        [c] = self.comments()
+        self.assertTrue(c["body"].startswith("🤖 **bombolt 紀錄 · 第 1 輪** — 發 PR"))
+        self.assertIn("**t**（`tester`）的電腦「test-mac」", c["body"])  # 誰、哪台電腦：腳本一定會寫
+        self.assertIn("✅ 驗收過這個 commit", c["body"])
+        self.assertIn("feat work — t", c["body"])
+        rec = bb_pr.parse_records(self.comments())[0]
+        base = sh(["git", "rev-parse", "origin/prod"], self.repo).stdout.strip()
+        self.assertEqual((rec["kind"], rec["n"], rec["to"], rec["from"]), ("round", 1, self.tip(), base))
+        self.assertEqual(rec["owner"], ME)
+
+        body = self.body()
+        self.assertNotIn(bb_pr.HANDOFF_PLACEHOLDER, body)
+        self.assertEqual(body.count(bb_pr.HANDOFF_START), 1)
+        self.assertIn('claude -n bb-r-12-bookings-default-month --permission-mode auto "/bombolt:bb-fix 7"', body)
+        self.assertIn("claude --resume sess-1", body)
+        self.assertIn(f"[第 1 輪]({c['url']})", body)
+        self.assertIn("<summary>🤖 bombolt 回饋", body)
+        self.assertTrue(body.rstrip().endswith("Closes #12"))
+
+        # 同一個 session、沒有新的 commit 再跑一次：改寫那一則，不重複貼
+        r = self.record("sess-1", summary="發 PR（補充）")
+        self.assertTrue(r["updated"])
+        self.assertEqual(len(self.comments()), 1)
+        self.assertIn("發 PR（補充）", self.comments()[0]["body"])
+        self.assertEqual(self.body().count(bb_pr.HANDOFF_START), 1)
+
+    def test_record_only_pushed_commits(self):
+        self.commit(self.wt, "wip.txt", "wip\n", "not pushed")
+        p = self.record("sess-1", verified=False, check=False)
+        self.assertEqual(p.returncode, 1)
+        self.assertIn("push", p.stderr)
+        self.assertEqual(self.comments(), [])
+
+    def test_context_finds_unrecorded_commits(self):
+        self.record("sess-1")
+        for n in ("12", "7"):  # issue 編號、PR 編號都可以
+            ctx = self.bbpr("context", "--pr", n)
+            self.assertEqual(ctx["pr"]["number"], 7)
+        self.assertEqual((ctx["issue"], len(ctx["records"]), ctx["unrecorded_commits"]), (12, 1, []))
+        self.assertTrue(ctx["verified_head"])
+        self.assertEqual(ctx["local_worktree"], str(self.wt))
+        self.assertEqual(ctx["records"][0]["who"], "**t**（`tester`）的電腦「test-mac」")
+
+        # 同事沒用 bombolt，直接 push：程式碼才是事實
+        self.coworker_push()
+        ctx = self.bbpr("context", "--pr", "7")
+        self.assertEqual([c["author"] for c in ctx["unrecorded_commits"]], ["Amy"])
+        self.assertFalse(ctx["verified_head"])
+        self.assertIn("沒有紀錄的 commit（Amy）", " ".join(ctx["messages"]))
+
+        # 補記：要先把 origin 的拉下來（本機比 origin 舊就不給記）
+        self.assertEqual(self.record("sess-2", kind="catchup", summary="Amy 的調整", verified=False,
+                                     check=False).returncode, 1)
+        sh(["git", "pull", "-q", "--ff-only", "origin", self.branch], self.wt)
+        self.record("sess-2", kind="catchup", summary="Amy 的調整", verified=False)
+        c = self.comments()[-1]["body"]
+        self.assertTrue(c.startswith("🤖 **bombolt 紀錄 · 補記** — Amy 的調整"))
+        self.assertIn("沒有經過 bombolt 的改動（Amy），由 **t**（`tester`）的電腦「test-mac」從 diff 整理", c)
+        self.assertIn("⚠️ 這個 commit 還沒驗收", c)
+        ctx = self.bbpr("context", "--pr", "7")
+        self.assertEqual(ctx["unrecorded_commits"], [])
+        self.assertFalse(ctx["verified_head"])  # 補記不等於驗收
+        self.assertIn("還沒有驗收過", " ".join(ctx["messages"]))
+
+        # 下一輪：補記不算一輪
+        self.commit(self.wt, "fix.txt", "fix\n", "round two")
+        sh(["git", "push", "-q", "origin", self.branch], self.wt)
+        r = self.record("sess-2", summary="回應 review")
+        self.assertEqual(r["n"], 2)
+        self.assertTrue(self.bbpr("context", "--pr", "7")["verified_head"])
+        body = self.body()
+        self.assertEqual(body.count("\n- ["), 3)  # 修改歷程：第 1 輪、補記、第 2 輪
+        self.assertIn("claude --resume sess-2", body)
+        self.assertNotIn("claude --resume sess-1", body)
+
+    def test_note_appends_to_own_record(self):
+        self.record("sess-1")
+        r = self.bbpr("note", "--pr", "7", "--session-id", "sess-1", "--text", "review 第 2 條不改：會破壞 DoD 3")
+        self.assertTrue(r["appended"])
+        self.bbpr("note", "--pr", "7", "--session-id", "sess-1", "--text", "按鈕文案維持原樣")
+        [c] = self.comments()
+        self.assertEqual(c["body"].count(bb_pr.NOTES_HEADING), 1)
+        self.assertIn("t「test-mac」：review 第 2 條不改：會破壞 DoD 3", c["body"])
+        self.assertLess(c["body"].index("按鈕文案"), c["body"].index("</details>"))
+        self.assertEqual(len(bb_pr.parse_records(self.comments())), 1)  # 附加之後還讀得到紀錄
+
+        # 別的 session（例如新開的）：新貼一則「備註」
+        r = self.bbpr("note", "--pr", "7", "--session-id", "sess-2", "--text", "先不做深色模式", "--summary", "不做深色模式")
+        self.assertFalse(r["appended"])
+        recs = bb_pr.parse_records(self.comments())
+        self.assertEqual([x["kind"] for x in recs], ["round", "note"])
+        self.assertTrue(self.comments()[-1]["body"].startswith("🤖 **bombolt 紀錄 · 備註** — 不做深色模式"))
+        self.assertIn("claude --resume sess-2", self.body())
+        self.assertTrue(self.bbpr("context", "--pr", "7")["verified_head"])  # 備註沒有動 code
+
+    def test_history_rewritten(self):
+        self.record("sess-1")
+        (self.wt / "feature.txt").write_text("rewritten\n")
+        sh(["git", "commit", "-qa", "--amend", "-m", "feat work v2"], self.wt)
+        sh(["git", "push", "-q", "--force", "origin", self.branch], self.wt)
+        ctx = self.bbpr("context", "--pr", "7")
+        self.assertTrue(ctx["history_rewritten"])
+        self.assertEqual([c["subject"] for c in ctx["unrecorded_commits"]], ["feat work v2"])
+        self.assertIn("force push", " ".join(ctx["messages"]))
+
+    def test_lock(self):
+        working = status_comment({"state": "fixing", "owner": OTHER, "branch": self.branch, "since": "2026-09-01",
+                                  "session_id": "x", "pr": 7, "history": []}, issue=12)
+        self.update("_issue:12", comments=[working])
+        ctx = self.bbpr("context", "--pr", "7", "--session-id", "mine")
+        self.assertEqual((ctx["lock"]["mine"], ctx["lock"]["this_session"]), (False, False))
+        self.assertIn("Amy 的 MacBook", " ".join(ctx["messages"]))
+        self.run_script("bb_issues.py", "mark", "--issue", "12", "--event", "fixing", "--pr", "7", "--session-id", "mine")
+        ctx = self.bbpr("context", "--pr", "7", "--session-id", "mine")
+        self.assertEqual((ctx["lock"]["mine"], ctx["lock"]["this_session"]), (True, True))
+        self.assertEqual(ctx["messages"], ["這個 PR 還沒有 bombolt 修改紀錄（這個功能之前開的）：以 PR 內文和 diff 為準，這一輪要重新驗收。"])
+
+    def test_legacy_body_section_is_replaced(self):
+        old = PR_BODY.replace("<!-- bombolt:handoff -->",
+                              "實作 session 在 **t** 的電腦上，只有那台電腦能接著修改。\n\n```bash\nclaude --resume old\n```")
+        self.update("_pr:7", body=old)
+        self.record("sess-1")
+        body = self.body()
+        self.assertNotIn("只有那台電腦能接著修改", body)
+        self.assertNotIn("claude --resume old", body)
+        self.assertEqual(body.count("## 🔁 要修改的話"), 1)
+        self.assertIn(bb_pr.HANDOFF_END, body)
+        self.assertIn("<summary>🤖 bombolt 回饋", body)
+        self.assertTrue(body.rstrip().endswith("Closes #12"))
+
+    def test_resolve_errors(self):
+        self.update("_pr:7", state="CLOSED")
+        p = self.record("sess-1", check=False)
+        self.assertEqual(p.returncode, 1)
+        self.assertIn("不是開著的", p.stderr)
+        d = self.data()
+        d[self.branch][0]["state"] = "CLOSED"
+        self.gh_data.write_text(json.dumps(d, ensure_ascii=False))
+        p = self.bbpr("context", "--pr", "12", check=False)
+        self.assertEqual(p.returncode, 1)
+        self.assertIn("沒有開著的 PR", p.stderr)
+        self.update("_pr:7", headRefName="feature/x", state="OPEN")
+        p = self.bbpr("context", "--pr", "7", check=False)
+        self.assertIn("不是 bombolt 建的", p.stderr)
+
+
+class TestPickup(HandoffFixture):
+    """bb_worktree.py pickup：另一台電腦（或同事）接手開著的 PR；worktree 的位置、名字都跟原本那台一樣。"""
+
+    def setUp(self):
+        super().setUp()
+        self.repo2 = self.tmp / "machine2" / "repo"  # 另一台電腦的主 checkout
+        sh(["git", "clone", "-q", str(self.origin), str(self.repo2)], self.tmp)
+        for k, v in (("user.email", "b@example.com"), ("user.name", "t"), ("bombolt.machine", "intel-mac")):
+            sh(["git", "config", k, v], self.repo2)
+        (self.repo2 / ".claude").mkdir()
+        (self.repo2 / ".claude" / "bombolt.md").write_text(CONFIG)
+        (self.repo2 / "backend").mkdir()
+        (self.repo2 / "backend" / ".env.local").write_text("SECRET=2\n")
+
+    def pickup(self, cwd, n="7", sid="sess-b", check=True):
+        p = self.run_script("bb_worktree.py", "pickup", "--pr", n, "--session-id", sid, cwd=cwd, check=check)
+        return json.loads(p.stdout) if p.returncode == 0 else p
+
+    def head(self, where):
+        return sh(["git", "rev-parse", "HEAD"], where).stdout.strip()
+
+    def test_other_machine_then_back(self):
+        self.record("sess-1")
+        r = self.pickup(self.repo2, n="12")  # issue 編號也可以
+        wt2 = self.repo2 / ".claude" / "worktrees" / self.branch
+        self.assertEqual((r["status"], r["path"], r["pr"], r["issue"]), ("created", str(wt2), 7, 12))
+        self.assertEqual(self.head(wt2), self.tip())
+        self.assertEqual(sh(["git", "rev-parse", "--abbrev-ref", "@{u}"], wt2).stdout.strip(), f"origin/{self.branch}")
+        self.assertEqual((wt2 / "backend" / ".env.local").read_text(), "SECRET=2\n")  # 這台自己的 .env
+        info = json.loads(self.run_script("bb_worktree.py", "info", cwd=wt2).stdout)
+        self.assertEqual((info["session_id"], info["issue"], info["owner"]["machine"]), ("sess-b", 12, "intel-mac"))
+        self.assertTrue(info["config_snapshot"])
+
+        # 接手的那台改完、push（upstream 設好了，git push 就推回同一支）、記一輪
+        ctx = self.bbpr("context", "--pr", "7", cwd=wt2)
+        self.assertEqual((len(ctx["records"]), ctx["unrecorded_commits"], ctx["verified_head"]), (1, [], True))
+        self.commit(wt2, "fix.txt", "fix\n", "fix from intel")
+        sh(["git", "push", "-q"], wt2)
+        self.record("sess-b", summary="回應 review", cwd=wt2)
+        self.assertIn("**t**（`tester`）的電腦「intel-mac」", self.comments()[-1]["body"])
+
+        # 回到原本那台：fast-forward、紀錄接得上
+        r = self.pickup(self.repo, sid="sess-c")
+        self.assertEqual((r["status"], r["pulled"]), ("updated", 1))
+        self.assertEqual(self.head(self.wt), self.tip())
+        self.assertEqual(self.bbpr("context", "--pr", "7")["unrecorded_commits"], [])
+        self.assertEqual(self.pickup(self.repo, sid="sess-c")["status"], "exists")
+        meta = bb_lib.read_meta(self.wt)
+        self.assertEqual((meta["session_id"], meta["previous_session_ids"]), ("sess-c", ["sess-1"]))
+
+    def test_ahead_diverged_dirty(self):
+        self.commit(self.wt, "local.txt", "x\n", "local only")
+        r = self.pickup(self.repo)
+        self.assertEqual((r["status"], r["ahead"]), ("ahead", 1))
+        self.assertIn("還沒 push", r["message"])
+        self.coworker_push()
+        p = self.pickup(self.repo, check=False)
+        self.assertEqual(p.returncode, 1)
+        self.assertIn("分岔", p.stderr)
+        sh(["git", "reset", "-q", "--hard", "HEAD~1"], self.wt)
+        (self.wt / "wip.txt").write_text("wip\n")
+        p = self.pickup(self.repo, check=False)
+        self.assertIn("未 commit", p.stderr)
+
+    def test_leftover_branch_without_worktree(self):
+        sh(["git", "worktree", "remove", str(self.wt)], self.repo)
+        self.coworker_push()
+        r = self.pickup(self.repo)
+        self.assertEqual((r["status"], r["pulled"]), ("created", 1))
+        self.assertEqual(self.head(self.wt), self.tip())
+
+    def test_closed_pr(self):
+        self.update("_pr:7", state="MERGED")
+        p = self.pickup(self.repo2, check=False)
+        self.assertEqual(p.returncode, 1)
+        self.assertIn("不是開著的", p.stderr)
+        self.assertFalse((self.repo2 / ".claude" / "worktrees").exists())
 
 
 class TestRedoClean(RepoFixture):
