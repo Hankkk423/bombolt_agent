@@ -114,6 +114,7 @@ claude
 - 平行做多個 issue 時，port／資料庫怎麼隔開
 - 這個 repo 額外的安全禁區
 - merge 前你在哪裡做人工測試（stage 或本機）
+- PR 不是開到 default branch 的話，要不要裝自動關 issue 的 GitHub workflow
 
 問完之後，它會產生 `.claude/bombolt.md`，並實際跑一次啟動和登入的步驟確認寫得對。
 `.claude/worktrees/` 會自動加進本機的 `.git/info/exclude`，不用改 `.gitignore`。
@@ -276,11 +277,11 @@ PR 是 MERGED、本地 tip 等於 PR merge 時的 head、不在受保護名單�
   它會把最新的 `pr_base` 合進來、解衝突、跑閘門、push，並在 PR 留言列出「這個 PR 現在也包含了哪些 PR」
   （之後若決定某個 PR 這波不上，就知道哪些 PR 已經帶著它）。
 
-⚠️ **這個模式下 issue 不會自動關**：`Closes #N` 只在 PR 開到 repo 的 **default branch** 時生效。
-bombolt 的做法是 PR 標題帶 `(#N)`（在 PR 列表就對得到 issue），並由 `/bombolt:bb-sweep`
-在查到 PR 已 merge 時明確關掉 issue。想要「merge 進 `pr_base` 就自動關」的話，
-在專案 repo 自己加一支 GitHub Action（`pull_request` 的 `closed` 事件、`merged == true`、
-base 是 `pr_base` 時，解析內文的 `Closes #N` 並關閉）——那是專案的事，bombolt 不內建。
+⚠️ **issue 怎麼關**：bombolt 發 PR 時內文固定寫 `Closes #N`，GitHub 在 PR merge 時會自己關掉對應的 issue——
+但這只在 PR 開到 repo 的 **default branch** 時生效。PR 開到別支（例如 `pr_base`）時，
+bombolt 在 PR 標題帶 `(#N)`（在 PR 列表就對得到 issue），並由 `/bombolt:bb-sweep` 在查到 PR 已 merge 時明確關掉 issue。
+想要「merge 就自動關」，`/bombolt:bb-setup` 會問要不要幫你裝一支 GitHub workflow
+（[範本](skills/bb-setup/close-issues-workflow.yml)：PR merge 進那一支時，解析內文的 `Closes #N` 並關閉）。
 
 ## 命名
 

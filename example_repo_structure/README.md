@@ -7,6 +7,8 @@ myapp/
 ├── .claude/
 │   ├── bombolt.md        ← 必要：這個 repo 的 bombolt 設定，要 commit
 │   └── settings.json     ← 選用：在這個 repo 指定要用 bombolt，要 commit
+├── .github/workflows/
+│   └── bombolt-close-issues.yml  ← 選用：PR 不是開到 default branch 才需要，要 commit
 └── ...（你原本的程式碼）
 ```
 
@@ -36,6 +38,15 @@ myapp/
 每個人都已經照 bombolt 的 README 自己裝好的話，就不需要這個檔案。
 
 如果你的 repo 本來就有 `.claude/settings.json`，把這兩個 key 合併進去就好，不要整份覆蓋。
+
+## `.github/workflows/bombolt-close-issues.yml`（選用）
+
+[範本](../skills/bb-setup/close-issues-workflow.yml)
+
+bombolt 發 PR 時內文固定寫 `Closes #N`，但 GitHub 只在 PR 開到 repo 的 default branch 時才會因此自動關 issue。
+PR 開到的那一支（`pr_base`，沒設就是 `base_branch`）不是 default branch 的話，issue 要等 `/bombolt:bb-sweep` 才會關；
+想要 PR 一 merge 就關，就加這支 workflow。`/bombolt:bb-setup` 發現需要時會問你，並把範本裡的 `{{pr_base}}` 換成那一支。
+`myapp` 的 PR 開回 `main`（default branch），所以不需要它。
 
 ## 不用放進 repo、bombolt 會自己處理的
 

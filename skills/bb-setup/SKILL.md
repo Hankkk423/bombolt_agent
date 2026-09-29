@@ -74,7 +74,7 @@ argument-hint: "[可選：補充說明]"
    本機的話，再問在外面用手機測（外網 sandbox）時要開哪個 port、啟動時要多加什麼，照調查結果給建議（→「Sandbox（外網測試）」一節）。
 8. **排查資源**：排查使用者回報的問題時，agent 可以用什麼**唯讀**的方式看 log、錯誤追蹤、資料？沒有就寫「無」（→「排查資源」一節）。
 
-第 3 步的「忽略清單」與第 4 步的「commit／settings.json」問題，併進最後一輪一起問。
+第 3 步的「忽略清單」與第 4 步的「commit／settings.json／關 issue 的 workflow」問題，併進最後一輪一起問。
 模板裡其他欄位（專案知識、commit 慣例、截圖慣例）用第 1 步的調查結果填；調查不出來、又會影響實作的，才加進題目問。
 
 ### 3. 本機的準備（直接做，不用問）
@@ -104,3 +104,8 @@ argument-hint: "[可選：補充說明]"
    - 如果還想讓同事 clone 之後自動被提示安裝 bombolt，可以在 repo 的 `.claude/settings.json` 加上
      `extraKnownMarketplaces` 與 `enabledPlugins`（見 bombolt 的 README）——**問過使用者才加**。
      先用 `git ls-remote <marketplace repo 的網址>` 確認那個 repo 存在；不存在就告訴使用者，同事會被提示安裝一個抓不到的 marketplace。
+   - PR 開到的那一支（`pr_base`，沒設就是 `base_branch`）不是 repo 的 default branch（第 1 步查到的 `origin/HEAD`）時，
+     PR 內文的 `Closes #N` 不會讓 GitHub 自動關 issue，只能等 `/bombolt:bb-sweep` 收尾。
+     問使用者要不要裝 [close-issues-workflow.yml](close-issues-workflow.yml)（PR merge 就自動關 issue）——**問過使用者才加**：
+     把 `{{pr_base}}` 換成那一支，寫到 `.github/workflows/bombolt-close-issues.yml`，跟設定檔一起 commit
+     （它要在 PR 開到的那一支上才會生效）。`.github/workflows/` 裡已經有在 PR merge 時關 issue 的 workflow 就不用問。
