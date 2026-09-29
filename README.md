@@ -383,6 +383,8 @@ bombolt 所有的 GitHub 操作（開 issue、發 PR、留言、附圖）都經�
   讀不到時這一項會失效，但另外的保留條件（未 commit、未 push、PR 未 merge、worktree 被 lock）仍然有效。
 - `gh --attach` 上傳的圖片在私有 repo 裡誰看得到，以 GitHub 的權限為準。
 - UI 驗收需要專案有「不碰真實資料就能登入」的方法（寫在 `.claude/bombolt.md`）。沒有的話，UI 類的完成條件會被標成「無法驗證」。
+- 在 Claude Code 的 session 裡，腳本連 GitHub 有時會拿不到你的 SSH key（`Permission denied (publickey)`，自己在終端機跑卻正常）。
+  這時腳本會印出一行 `!` 開頭的指令，照 agent 的指示貼到提示列執行，它會接著做下去。
 
 ## 授權
 

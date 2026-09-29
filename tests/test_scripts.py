@@ -9,6 +9,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -168,6 +169,24 @@ class TestWorktree(RepoFixture):
         (self.repo / ".claude" / "bombolt.md").unlink()
         p = self.run_script("bb_worktree.py", "create", "--issue", "1", "--slug", "x", check=False)
         self.assertIn("bb-setup", p.stderr)
+
+    def test_auth_failure_hands_command_to_user(self):
+        # agent 的執行環境拿不到 SSH key：印出一行請使用者用 ! 重跑的指令
+        fake_ssh = self.tmp / "fake-ssh"
+        fake_ssh.write_text('#!/bin/sh\necho "git@github.com: Permission denied (publickey)." >&2\nexit 255\n')
+        fake_ssh.chmod(0o755)
+        sh(["git", "remote", "set-url", "origin", "git@github.invalid:o/r.git"], self.repo)
+        self.env["GIT_SSH_COMMAND"] = str(fake_ssh)
+        p = self.run_script("bb_worktree.py", "create", "--issue", "1", "--slug", "x", check=False)
+        self.assertEqual(p.returncode, 1)
+        cmd = shlex.join(["python3", str(SCRIPTS / "bb_worktree.py"), "create", "--issue", "1", "--slug", "x"])
+        self.assertIn(f"! cd {shlex.quote(str(self.repo))} && {cmd}", p.stderr)
+
+    def test_other_fetch_failure_has_no_auth_hint(self):
+        p = self.run_script("bb_worktree.py", "create", "--issue", "1", "--slug", "x", "--base", "nope", check=False)
+        self.assertEqual(p.returncode, 1)
+        self.assertIn("fetch origin/nope 失敗", p.stderr)
+        self.assertNotIn("提示列", p.stderr)
 
     def test_info_from_inside_worktree(self):
         info = self.create_wt()

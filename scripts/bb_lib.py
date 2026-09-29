@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import os
 import platform
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -25,8 +26,21 @@ def git(args: List[str], cwd: str | Path, check: bool = True) -> str:
         ["git", *args], cwd=str(cwd), capture_output=True, text=True
     )
     if check and proc.returncode != 0:
-        raise RuntimeError(f"git {' '.join(args)} 失敗：{proc.stderr.strip()}")
+        raise RuntimeError(f"git {' '.join(args)} 失敗：{proc.stderr.strip()}{auth_hint(proc.stderr)}")
     return proc.stdout.rstrip("\n")
+
+
+# 連 GitHub 認證失敗的訊息（不含「Could not read from remote repository」：離線時也會出現，請使用者重跑也沒用）
+AUTH_FAIL_MARKS = ("Permission denied (publickey", "Authentication failed", "could not read Username")
+
+
+def auth_hint(stderr: str) -> str:
+    """連 GitHub 認證失敗時，附上請使用者重跑的指令（agent 的執行環境可能拿不到 SSH key）。"""
+    if not any(m in stderr for m in AUTH_FAIL_MARKS):
+        return ""
+    cmd = f"cd {shlex.quote(os.getcwd())} && {shlex.join(['python3', *sys.argv])}"
+    return ("\n→ 認證失敗：這個 session 的執行環境可能拿不到你的 SSH key。不要自己診斷或繞過，"
+            f"請使用者在提示列輸入下面這行，再照它的輸出繼續：\n! {cmd}")
 
 
 def git_ok(args: List[str], cwd: str | Path) -> bool:
