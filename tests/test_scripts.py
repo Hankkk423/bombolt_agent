@@ -250,6 +250,14 @@ class TestSnapshot(RepoFixture):
         self.run_script("bb_snapshot.py", "remove", str(snap))
         self.assertFalse(snap.exists())
 
+    def test_two_snapshots_in_the_same_second_get_different_paths(self):
+        a = json.loads(self.run_script("bb_snapshot.py", "create").stdout)["path"]
+        b = json.loads(self.run_script("bb_snapshot.py", "create").stdout)["path"]
+        self.assertNotEqual(a, b)
+        for snap in (a, b):
+            self.assertEqual((Path(snap) / "app.txt").read_text(), "v1\n")
+            self.run_script("bb_snapshot.py", "remove", snap)
+
     def test_remove_refuses_other_paths(self):
         p = self.run_script("bb_snapshot.py", "remove", str(self.repo), check=False)
         self.assertNotEqual(p.returncode, 0)
@@ -378,6 +386,24 @@ class TestGuard(RepoFixture):
         self.assertIsNone(self.bash("cat backend/.env.local"))
         self.assertIsNone(self.file("Edit", "src/app.ts"))
         self.assertIsNone(self.bash("git log --oneline -5"))
+
+    def test_data_heredoc_body_is_not_checked(self):
+        # 寫進檔案的內文只是文字：JS 的 e.key、文件裡寫的指令都不算
+        allowed = [
+            "cat > .bombolt/walkthrough.md <<'EOF'\nif (e.key === 'Enter') save()\nEOF",
+            "cat <<EOF > notes.md\n執行 git push origin main 與 vercel --prod\nEOF",
+            "tee docs/x.md <<-EOF\n\tcat server.key\n\tEOF",
+        ]
+        for c in allowed:
+            self.assertIsNone(self.bash(c), c)
+        denied = [
+            "bash <<'EOF'\ncat server.key\nEOF",
+            "cat <<'EOF' | sh\ncat ~/.aws/credentials\nEOF",
+            "cat > a.md <<'EOF'\nok\nEOF\ncat server.key",
+            "cat > a.md <<'EOF' && cat server.key\nok\nEOF",
+        ]
+        for c in denied:
+            self.assertIsNotNone(self.bash(c), c)
 
     def test_hook_protocol(self):
         payload = {"cwd": self.wt, "tool_name": "Bash", "tool_input": {"command": "git push origin main"}}

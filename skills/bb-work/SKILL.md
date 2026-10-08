@@ -139,6 +139,8 @@ git diff --stat <meta.base_sha> origin/<base>
 - 照 issue 的「實作步驟」逐步做。遵守改動檔案所在目錄的每一層 `AGENTS.md` / `CLAUDE.md`
   （讀那個目錄的任何檔案時會自動載入；compact 之後要再讀一次）。
 - 大範圍的搜尋交給 Explore subagent，保持自己的 context 乾淨。
+- 圖片和 PDF 讀進來就一直留在 context 裡，之後每一輪都要重讀：
+  驗收用的截圖交給 verifier，讀它回報的文字就好；要決定怎麼改 code 才需要親眼看時，只看那一張（PDF 只讀需要的頁），同一張不要重複讀。
 - 這個 repo 有自動測試框架的話，新增或改變的行為要補上對應的測試（issue 沒寫也要補——它是「確保正確性」的一部分）。
 - 每完成一個有意義的步驟就 commit。commit message 照這個 repo 既有的風格
   （先看 `git log --oneline -15 origin/<base>`），簡短、說清楚做了什麼。

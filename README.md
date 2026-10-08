@@ -331,6 +331,21 @@ bombolt 所有的 GitHub 操作（開 issue、發 PR、留言、附圖）都經�
 `bb-gh` 由 plugin 的 `bin/` 提供，在載入 bombolt 的 Claude Code session 裡可以直接呼叫。
 你在自己的終端機打 `gh`，一樣照舊。
 
+## 模型與 effort
+
+所有 subagent 都跟主 session 用同一個模型（你自己選的）。effort 照工作性質固定：
+
+| subagent | effort |
+|---|---|
+| `bb-reviewer`、`bb-cold-reader` | high |
+| `bb-verifier` | medium |
+| bb-plan、bb-work 派的 Explore 與上網研究 | 跟主 session 一樣（`/effort`） |
+
+需要判斷力的工作（找 bug、找出 issue 裡得猜的地方）用 high；照表執行的驗收用 medium，省 usage 也比較快。
+
+- 想讓 subagent 用跟主 session 不同的模型：設環境變數 `CLAUDE_CODE_SUBAGENT_MODEL=<模型>`（內建的 Explore 不受影響）。
+- 用環境變數 `CLAUDE_CODE_EFFORT_LEVEL` 設的 effort 會蓋掉上面的設定；用 `/effort` 設的不會。
+
 ## 安全守門
 
 實作 session 是完全自主的，所以真正危險的動作不靠 prompt 自律，而是由 PreToolUse hook（`scripts/bb_guard.py`）硬擋。

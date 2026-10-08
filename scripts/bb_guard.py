@@ -157,6 +157,29 @@ def split_segments(command: str, *, quote_aware: bool = False) -> List[List[str]
     return out
 
 
+HEREDOC_START = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
+
+
+def strip_data_heredocs(command: str) -> str:
+    """拿掉 `cat > f <<'EOF'`、`tee f <<EOF` 的內文：那只是要寫進檔案的文字（跟 Write 工具一樣不檢查內容），
+    不然內文裡的 JS `e.key`、文件裡寫的 `git push origin main` 都會被當成指令。
+    餵給 bash、python 之類的 heredoc（或 `cat <<EOF | bash`）是程式，照樣檢查。"""
+    lines = command.split("\n")
+    out: List[str] = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        out.append(line)
+        i += 1
+        m = HEREDOC_START.search(line)
+        words = line.split()
+        if not m or not words or os.path.basename(words[0]) not in ("cat", "tee") or "|" in line:
+            continue
+        while i < len(lines) and lines[i].strip() != m.group(2):
+            i += 1
+    return "\n".join(out)
+
+
 def check_git_push(tokens: List[str], own_branch: str, protected: List[str]) -> Optional[str]:
     # tokens 形如 ["git", (-C x)..., "push", ...]
     try:
@@ -298,7 +321,7 @@ def evaluate(payload: Dict[str, Any]) -> Optional[str]:
     if tool != "Bash":
         return None
 
-    command = tin.get("command", "") or ""
+    command = strip_data_heredocs(tin.get("command", "") or "")
     for pattern in DEFAULT_DENY_COMMANDS + cfg.get("deny_commands", []):
         try:
             if re.search(pattern, command):

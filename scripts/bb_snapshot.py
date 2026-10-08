@@ -20,6 +20,7 @@ import json
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -46,8 +47,10 @@ def cmd_create(args: argparse.Namespace) -> None:
         fail(f"fetch origin/{base} 失敗：{e}")
     sha = bb_lib.git(["rev-parse", f"origin/{base}"], repo)
     stamp = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
-    dest = repo / bb_lib.WORKTREES_REL / f"_plan-{stamp}"
-    dest.mkdir(parents=True)
+    parent = repo / bb_lib.WORKTREES_REL
+    parent.mkdir(parents=True, exist_ok=True)
+    # 同一秒開兩個規劃 session 也不會撞名
+    dest = Path(tempfile.mkdtemp(prefix=f"_plan-{stamp}-", dir=str(parent)))
     archive = subprocess.run(["git", "archive", "--format=tar", sha], cwd=str(repo), capture_output=True)
     if archive.returncode != 0:
         shutil.rmtree(dest, ignore_errors=True)
