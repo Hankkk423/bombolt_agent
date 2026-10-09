@@ -243,7 +243,8 @@ claude -n bb-<repo>-<n>-<slug> --permission-mode auto "/bombolt:bb-fix <PR 編�
 ### 4. 清理：`/bombolt:bb-sweep`
 
 先列出每個 worktree 會被刪除還是保留、以及理由，你確認之後才會真的刪。
-也可以直接跑腳本：`python3 <bombolt>/scripts/bb_sweep.py <repo 路徑...>`（加 `--apply` 才會刪）。
+在哪個 repo 執行都可以：沒指定 repo 時會掃本機所有用過 bombolt 的 repo，再問你要清哪幾個。
+也可以直接跑腳本：`python3 <bombolt>/scripts/bb_sweep.py [repo 路徑...]`（不給路徑就掃全部；加 `--apply` 才會刪）。
 
 會一起處理：本機 branch、對應的 issue（關閉，狀態留言改成「已 merge」）、**遠端 branch**（GitHub 沒辦法在 merge 時自動刪、又沒有 admin
 權限開那個設定時很有用）。遠端只在全部條件成立時才刪：bombolt 建的 `bb-*` branch、不在受保護名單、
@@ -396,6 +397,8 @@ bombolt 所有的 GitHub 操作（開 issue、發 PR、留言、附圖）都經�
 
 - `bb_sweep.py` 判斷「有沒有 session 在用」時讀的是 `~/.claude/sessions/*.json`，這不是 Claude Code 官方文件記載的介面。
   讀不到時這一項會失效，但另外的保留條件（未 commit、未 push、PR 未 merge、worktree 被 lock）仍然有效。
+- `bb_sweep.py` 沒給路徑時，從 `~/.claude.json` 找本機的 repo，這也不是官方文件記載的介面。
+  讀不到時會退回目前所在的 repo；這時請直接給 repo 路徑。
 - `gh --attach` 上傳的圖片在私有 repo 裡誰看得到，以 GitHub 的權限為準。
 - UI 驗收需要專案有「不碰真實資料就能登入」的方法（寫在 `.claude/bombolt.md`）。沒有的話，UI 類的完成條件會被標成「無法驗證」。
 - 在 Claude Code 的 session 裡，腳本連 GitHub 有時會拿不到你的 SSH key（`Permission denied (publickey)`，自己在終端機跑卻正常）。

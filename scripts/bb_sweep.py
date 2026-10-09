@@ -3,7 +3,7 @@
 
 用法：
   bb_sweep.py [repo 路徑 ...] [--apply] [--json]
-  （不給路徑就用目前所在的 repo）
+  （不給路徑：~/.claude.json 記的專案裡，有 .claude/worktrees/ 的 repo 全部處理；一個都找不到才用目前所在的 repo）
 
 只處理 `<repo>/.claude/worktrees/` 底下的 worktree。**任何一條成立就保留**：
   1. 有活著的 Claude session 在用它（cwd 在裡面，或 metadata 記的 session 還開著）
@@ -393,14 +393,33 @@ def render(report: Dict[str, Any], apply: bool) -> str:
     return "\n".join(lines + [""])
 
 
+def known_repos() -> List[str]:
+    """~/.claude.json 記的每個專案目錄 → 主 checkout，只留有 .claude/worktrees/ 的；讀不到回空清單。
+
+    ⚠️ ~/.claude.json 不是官方文件記載的介面，格式可能改變；找不到時使用者可以自己給路徑。
+    """
+    try:
+        data = json.loads((Path.home() / ".claude.json").read_text(encoding="utf-8"))
+        projects = list(data.get("projects") or {})
+    except (OSError, ValueError, AttributeError, TypeError):
+        return []
+    repos = []
+    for p in projects:
+        repo = bb_lib.main_checkout(p) if Path(p).is_dir() else None
+        if repo and (repo / bb_lib.WORKTREES_REL).is_dir():
+            repos.append(str(repo))
+    return sorted(set(repos))
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("repos", nargs="*", default=["."])
+    p.add_argument("repos", nargs="*")
     p.add_argument("--apply", action="store_true", help="真的刪除（預設只列出）")
     p.add_argument("--json", action="store_true")
     p.add_argument("--keep-remote", action="store_true", help="遠端 branch 一律不刪")
     args = p.parse_args()
-    reports = [sweep_repo(r, args.apply, args.keep_remote) for r in args.repos]
+    repos = args.repos or known_repos() or ["."]
+    reports = [sweep_repo(r, args.apply, args.keep_remote) for r in repos]
     if args.json:
         print(json.dumps(reports, ensure_ascii=False, indent=2))
     else:

@@ -755,6 +755,25 @@ class TestSweep(RepoFixture):
         self.assertEqual(r["chore/merged"]["action"], "keep")
         self.assertTrue(self.has_branch("chore/merged"))
 
+    def test_no_path_sweeps_known_repos(self):
+        _, wt, _ = self.work(1, "merged")
+        plain = self.tmp / "plain"  # 沒用過 bombolt 的 repo
+        sh(["git", "init", "-q", str(plain)], self.tmp)
+        (self.tmp / "not-repo").mkdir()
+        claude_json = self.sessions.parent.parent / ".claude.json"
+        claude_json.write_text(json.dumps({"projects": {
+            str(wt): {}, str(self.repo): {}, str(plain): {}, str(self.tmp / "not-repo"): {}, str(self.tmp / "gone"): {}}}))
+        out = self.run_script("bb_sweep.py", "--json", cwd=self.tmp)  # 在 repo 外面執行
+        self.assertEqual([r["repo"] for r in json.loads(out.stdout)], [str(self.repo)])
+        self.assertTrue(wt.exists())  # 沒加 --apply 不刪
+        # 有給路徑就只處理那些
+        out = self.run_script("bb_sweep.py", str(plain), "--json", cwd=self.tmp)
+        self.assertEqual([r["repo"] for r in json.loads(out.stdout)], [str(plain)])
+        # 讀不到 ~/.claude.json：退回目前所在的 repo
+        claude_json.unlink()
+        out = self.run_script("bb_sweep.py", "--json", cwd=wt)
+        self.assertEqual([r["repo"] for r in json.loads(out.stdout)], [str(self.repo)])
+
     def test_local_branch_lease(self):
         import bb_sweep  # noqa: E402
         head = self.local_branch("chore/merged")

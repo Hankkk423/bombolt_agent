@@ -1,8 +1,8 @@
 ---
 name: bb-sweep
-description: 清理已經完成的 bombolt worktree（PR 已 merge、沒有未 commit/未 push 的東西、沒有 Claude session 在用）：刪本機 worktree 與 branch、關閉對應的 issue，並在嚴格條件下刪掉遠端 branch；另外也清掉沒有 worktree、PR 已 merge 的本地 branch。先列出、確認後才刪。
+description: 清理本機所有用過 bombolt 的 repo 裡已經完成的 worktree（PR 已 merge、沒有未 commit/未 push 的東西、沒有 Claude session 在用）：刪本機 worktree 與 branch、關閉對應的 issue，並在嚴格條件下刪掉遠端 branch；另外也清掉沒有 worktree、PR 已 merge 的本地 branch。先列出、確認後才刪。
 when_to_use: 使用者說「清理 worktree」「bb-sweep」「把做完的 worktree 刪掉」「清掉已經 merge 的本地 branch」時。
-argument-hint: "[可選：其他 repo 的路徑，空白分隔]"
+argument-hint: "[可選：只處理這些 repo 的路徑，空白分隔；不給就掃本機所有用過 bombolt 的 repo]"
 disable-model-invocation: true
 ---
 
@@ -13,24 +13,30 @@ disable-model-invocation: true
 1. **先列出（不刪）**：
 
    ```bash
-   python3 "${CLAUDE_PLUGIN_ROOT}/scripts/bb_sweep.py" . $ARGUMENTS
+   python3 "${CLAUDE_PLUGIN_ROOT}/scripts/bb_sweep.py" $ARGUMENTS
    ```
 
+   沒給路徑時，腳本自動找出本機所有用過 bombolt 的 repo（`~/.claude.json` 記的專案裡，有 `.claude/worktrees/` 的）；
+   有給路徑就只處理那些。
    判斷全部由腳本做（規則見腳本開頭的說明），**不要自己另外判斷哪些可以刪**。
    任何一條「保留」的理由成立就保留；查不到狀態（gh 失敗、離線）也一律保留。
 
-2. **把結果原樣給使用者看**：輸出分兩段——「worktree」與「沒有 worktree、PR 已 merge 的本地 branch」，
-   各自列出哪些會刪、哪些保留以及理由。
+2. **把結果給使用者看**：輸出一個 repo 一段（`## <repo 路徑>`），每段再分「worktree」與「沒有 worktree、PR 已 merge 的本地 branch」。
+   - 有可刪項目（🗑️／🧹）的 repo：原樣列出哪些會刪、哪些保留以及理由。
+   - 全部保留的 repo：各縮成一行（repo 名＋保留幾個），不列理由。有 ⚠️ 錯誤的 repo 也是一行，附上錯誤訊息。
 
-3. **問使用者要不要刪**（AskUserQuestion：「刪除這 N 個」／「先不要」）。
-   問題裡把 worktree、本地 branch、遠端 branch 三類分開列清楚。兩段都沒有可刪的就直接結束。
+3. **問使用者要清哪些 repo**（AskUserQuestion）。所有 repo 都沒有可刪的就直接結束，不用問。
+   - 有可刪項目的 repo 不超過 3 個：multiSelect，一個 repo 一個選項，再加一個「先不要」。
+   - 超過 3 個：「全部清理（N 個 repo）」／「先不要」，只清部分的話使用者會在 Other 寫 repo 名。
+   - 每個 repo 的選項說明把 worktree、本地 branch、遠端 branch 三類分開列清楚。
 
 4. 確認後：
 
    ```bash
-   python3 "${CLAUDE_PLUGIN_ROOT}/scripts/bb_sweep.py" . $ARGUMENTS --apply
+   python3 "${CLAUDE_PLUGIN_ROOT}/scripts/bb_sweep.py" <使用者選的 repo 路徑…> --apply
    ```
 
+   路徑照第 1 步輸出的 `## <repo 路徑>` 填，**一定要明確給路徑**：不給路徑會清到所有 repo。
    ⚠️ `--apply` 會重新判斷一次（不沿用剛才的結果），所以兩次之間狀態變了（例如有人又開了 session）也不會誤刪。
 
 5. 回報實際刪了哪些，以及有沒有 issue 沒關成（原因照腳本回報的訊息講）。
