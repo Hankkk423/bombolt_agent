@@ -15,6 +15,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import time
 import unittest
 from pathlib import Path
 
@@ -773,6 +774,58 @@ class TestSweep(RepoFixture):
         claude_json.unlink()
         out = self.run_script("bb_sweep.py", "--json", cwd=wt)
         self.assertEqual([r["repo"] for r in json.loads(out.stdout)], [str(self.repo)])
+
+    def snapshot(self, name, hours_old):
+        path = self.repo / ".claude" / "worktrees" / name
+        path.mkdir(parents=True, exist_ok=True)
+        (path / "app.txt").write_text("v1\n")
+        t = time.time() - hours_old * 3600
+        os.utime(path, (t, t))
+        return path
+
+    def sweep_snapshots(self, *extra):
+        out = self.run_script("bb_sweep.py", str(self.repo), "--json", *extra)
+        return {Path(i["path"]).name: i for i in json.loads(out.stdout)[0]["snapshots"]}
+
+    def test_snapshots_only_removed_with_flag(self):
+        stale = self.snapshot("_plan-20260101-000000-old", 48)
+        fresh = self.snapshot("_plan-20260101-000000-new", 1)
+        target = self.snapshot("elsewhere", 48)  # symlink 指向的東西不能被刪
+        link = self.repo / ".claude" / "worktrees" / "_plan-link"
+        link.symlink_to(target)
+        sh(["git", "worktree", "add", "-q", "-b", "plan-wt", str(self.repo / ".claude/worktrees/_plan-wt")], self.repo)
+        t = time.time() - 48 * 3600
+        os.utime(self.repo / ".claude/worktrees/_plan-wt", (t, t))
+        not_snap = self.snapshot("bb-1-plain-dir", 48)  # 不是 _plan-* 的不列出
+
+        r = self.sweep_snapshots()
+        self.assertEqual(set(r), {stale.name, fresh.name, "_plan-link", "_plan-wt"})
+        self.assertEqual(r[stale.name]["action"], "remove")
+        for kept in (fresh.name, "_plan-link", "_plan-wt"):
+            self.assertEqual(r[kept]["action"], "keep", kept)
+        self.assertTrue(stale.exists())  # dry-run 不刪
+
+        self.sweep_snapshots("--apply")  # --apply 不刪快照
+        self.assertTrue(stale.exists())
+
+        r = self.sweep_snapshots("--remove-snapshots")
+        self.assertEqual(r[stale.name]["result"], "已刪除快照")
+        self.assertFalse(stale.exists())
+        for kept in (fresh, link, target, not_snap, self.repo / ".claude/worktrees/_plan-wt" / "app.txt"):
+            self.assertTrue(kept.exists(), kept)
+
+    def test_snapshot_kept_while_session_in_repo(self):
+        stale = self.snapshot("_plan-20260101-000000-old", 48)
+        (self.sessions / "1.json").write_text(json.dumps({"pid": os.getpid(), "sessionId": "s", "cwd": str(self.repo)}))
+        r = self.sweep_snapshots("--remove-snapshots")
+        self.assertEqual(r[stale.name]["action"], "keep")
+        self.assertTrue(stale.exists())
+        # session 在別的 worktree（bb-work）不擋快照；已經死掉的 session 也不擋
+        (self.sessions / "1.json").write_text(json.dumps({"pid": os.getpid(), "sessionId": "s",
+                                                          "cwd": str(self.repo / ".claude/worktrees/bb-1-x")}))
+        (self.sessions / "2.json").write_text(json.dumps({"pid": 999999, "sessionId": "d", "cwd": str(self.repo)}))
+        self.sweep_snapshots("--remove-snapshots")
+        self.assertFalse(stale.exists())
 
     def test_local_branch_lease(self):
         import bb_sweep  # noqa: E402

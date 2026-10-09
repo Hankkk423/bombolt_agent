@@ -37,6 +37,13 @@ squash merge 之後那個 branch 在 git 眼裡永遠是沒 merge。
   iii. GitHub 上有以它當 head、狀態 MERGED 的 PR，而且沒有還開著的 PR 用它當 head
   iv.  本地 tip == PR merge 時的 head（merge 之後本地沒有再多東西）
 沒有 PR 的 branch 不列出（那不是「已經 merge 的 branch」）；查不到就保留。
+
+另外列出**規劃快照**（`.claude/worktrees/_plan-*`）：bb-plan 用 git archive 解開的 origin/<base> 唯讀副本，
+規劃收尾時會刪，規劃中斷就會留下來。裡面沒有任何工作成果，但**只有加 `--remove-snapshots` 才刪**
+（`--apply` 不刪快照：要先讓使用者知道它是什麼、另外確認）。**任何一條成立就保留**：
+  1. 有活著的 Claude session 的 cwd 是 repo 主目錄或在快照裡（可能正在規劃）
+  2. 24 小時內才建立
+  3. 是 symlink 或被 git 登記成 worktree（不是 bb_snapshot.py 建的東西）
 """
 
 from __future__ import annotations
@@ -44,8 +51,10 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -336,7 +345,47 @@ def sweep_branches(repo: Path, apply: bool) -> List[Dict[str, Any]]:
     return results
 
 
-def sweep_repo(repo_arg: str, apply: bool, keep_remote: bool = False) -> Dict[str, Any]:
+SNAPSHOT_FRESH_HOURS = 24
+
+
+def assess_snapshot(path: Path, repo: Path, sessions: List[Dict[str, Any]], worktree_paths: List[str]) -> Dict[str, Any]:
+    """bb-plan 的唯讀快照（`_plan-*`）：規劃收尾時會刪，中斷就會留下來。"""
+    keep: List[str] = []
+    for s in sessions:
+        cwd = s.get("cwd", "")
+        if cwd == str(path) or cwd.startswith(str(path) + "/"):
+            keep.append(f"有 Claude session 正在快照裡（pid {s.get('pid')}，{s.get('name', '')}）")
+        elif cwd == str(repo):
+            keep.append(f"repo 主目錄有 Claude session 開著（pid {s.get('pid')}，{s.get('name', '')}），可能正在規劃、還在用這份快照")
+    if path.is_symlink() or str(path) in worktree_paths:
+        keep.append("是 symlink 或 git worktree，不是 bb-plan 建的快照")
+    else:
+        age_h = (time.time() - path.stat().st_mtime) / 3600
+        if age_h < SNAPSHOT_FRESH_HOURS:
+            keep.append(f"{age_h:.0f} 小時前才建立，可能還在規劃中")
+    reasons = keep or ["規劃中斷留下的唯讀快照（origin/<base> 的副本，沒有工作成果）；加 --remove-snapshots 才會刪"]
+    return {"path": str(path), "action": "keep" if keep else "remove", "reasons": reasons}
+
+
+def sweep_snapshots(repo: Path, sessions: List[Dict[str, Any]], remove_snapshots: bool) -> List[Dict[str, Any]]:
+    root = repo / bb_lib.WORKTREES_REL
+    if not root.is_dir():
+        return []
+    results = []
+    for path in sorted(root.glob("_plan-*")):
+        # 每一個都重新讀 worktree 清單：判斷與刪除之間不沿用舊結果
+        item = assess_snapshot(path, repo, sessions, [wt["path"] for wt in list_worktrees(repo)])
+        if remove_snapshots and item["action"] == "remove":
+            try:
+                shutil.rmtree(path)
+                item["result"] = "已刪除快照"
+            except OSError as e:
+                item["result"] = f"❌ 沒刪成：{e}"
+        results.append(item)
+    return results
+
+
+def sweep_repo(repo_arg: str, apply: bool, keep_remote: bool = False, remove_snapshots: bool = False) -> Dict[str, Any]:
     repo = bb_lib.main_checkout(Path(repo_arg).expanduser())
     if repo is None:
         return {"repo": repo_arg, "error": "不是 git repo"}
@@ -357,10 +406,11 @@ def sweep_repo(repo_arg: str, apply: bool, keep_remote: bool = False) -> Dict[st
             item["result"] = remove(repo, item, keep_remote)
         results.append(item)
     # worktree 先處理完：刪掉的 worktree 其 branch 也已經刪了，不會在這裡重複出現
-    return {"repo": str(repo), "worktrees": results, "branches": sweep_branches(repo, apply)}
+    return {"repo": str(repo), "worktrees": results, "branches": sweep_branches(repo, apply),
+            "snapshots": sweep_snapshots(repo, sessions, remove_snapshots)}
 
 
-def render(report: Dict[str, Any], apply: bool) -> str:
+def render(report: Dict[str, Any], apply: bool, remove_snapshots: bool = False) -> str:
     lines = [f"## {report['repo']}"]
     if report.get("error"):
         return "\n".join(lines + [f"⚠️ {report['error']}", ""])
@@ -390,6 +440,16 @@ def render(report: Dict[str, Any], apply: bool) -> str:
             lines.append(f"    - {r}")
         if it.get("result"):
             lines.append(f"    - ➜ {it['result']}")
+    snaps = report.get("snapshots", [])
+    if snaps:
+        snap_icon = {"keep": "🟢 保留", "remove": "🗑️ 刪除" if remove_snapshots else "🗑️ 可刪"}
+        lines.append("### 規劃快照（bb-plan 的唯讀副本）")
+        for it in snaps:
+            lines.append(f"- {snap_icon[it['action']]} `{Path(it['path']).name}`")
+            for r in it["reasons"]:
+                lines.append(f"    - {r}")
+            if it.get("result"):
+                lines.append(f"    - ➜ {it['result']}")
     return "\n".join(lines + [""])
 
 
@@ -417,16 +477,19 @@ def main() -> None:
     p.add_argument("--apply", action="store_true", help="真的刪除（預設只列出）")
     p.add_argument("--json", action="store_true")
     p.add_argument("--keep-remote", action="store_true", help="遠端 branch 一律不刪")
+    p.add_argument("--remove-snapshots", action="store_true", help="刪掉可刪的規劃快照（--apply 不刪快照）")
     args = p.parse_args()
     repos = args.repos or known_repos() or ["."]
-    reports = [sweep_repo(r, args.apply, args.keep_remote) for r in repos]
+    reports = [sweep_repo(r, args.apply, args.keep_remote, args.remove_snapshots) for r in repos]
     if args.json:
         print(json.dumps(reports, ensure_ascii=False, indent=2))
     else:
-        print("\n".join(render(r, args.apply) for r in reports))
+        print("\n".join(render(r, args.apply, args.remove_snapshots) for r in reports))
         if not args.apply and any(i["action"] != "keep" for r in reports
                                   for i in r.get("worktrees", []) + r.get("branches", [])):
             print("（這是 dry-run。確認後加 --apply 才會真的刪。）")
+        if not args.remove_snapshots and any(i["action"] == "remove" for r in reports for i in r.get("snapshots", [])):
+            print("（規劃快照要另外加 --remove-snapshots 才會刪；--apply 不會刪快照。）")
 
 
 if __name__ == "__main__":

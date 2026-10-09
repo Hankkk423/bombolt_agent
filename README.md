@@ -254,6 +254,10 @@ claude -n bb-<repo>-<n>-<slug> --permission-mode auto "/bombolt:bb-fix <PR 編�
 另外也會列出**沒有 worktree、PR 已 merge 的本地 branch**（例如手動建的 branch 在 squash merge 後還留在本機）：
 PR 是 MERGED、本地 tip 等於 PR merge 時的 head、不在受保護名單、沒被任何 worktree checkout 才刪，只刪本地、不動遠端與 issue。
 
+還會列出 **bb-plan 中斷留下的規劃快照**（`.claude/worktrees/_plan-*`，規劃用的唯讀副本，沒有工作成果）。
+repo 主目錄有 Claude session 開著、或 24 小時內才建立的會保留。快照會先跟你說明是什麼、另外問你，
+確認後才用 `--remove-snapshots` 刪；`--apply` 不會刪快照。
+
 ### 發版後同步：在主 checkout 執行 `/bombolt:bb-fix`
 
 有些 repo 上完版之後，會把 `integration_branches`（例如測試環境用的 `stage`）`reset --hard` 回最新的 `base_branch`。
