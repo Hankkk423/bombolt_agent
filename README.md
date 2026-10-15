@@ -114,6 +114,7 @@ claude
 - 平行做多個 issue 時，port／資料庫怎麼隔開
 - 這個 repo 額外的安全禁區
 - merge 前你在哪裡做人工測試（stage 或本機）
+- 這個 repo 常跟哪些 repo 一起改（`related_repos`，見 [跨 repo 的成對 issue](#跨-repo-的成對-issue)）
 - PR 不是開到 default branch 的話，要不要裝自動關 issue 的 GitHub workflow
 
 問完之後，它會產生 `.claude/bombolt.md`，並實際跑一次啟動和登入的步驟確認寫得對。
@@ -190,6 +191,23 @@ claude -n bb-<repo>-<n>-<slug> --permission-mode auto "/bombolt:bb-work <n>"
 **平行做多個 issue**：對每個 issue 各開一個終端機、各跑一次上面的指令（不同的 `<n>`）。
 每個 worktree 完全隔離，不會互相干擾；`.claude/bombolt.md` 若有寫怎麼隔開 port／資料庫
 （通常用 issue 編號錯開），照著做就不會撞。
+
+### 跨 repo 的成對 issue
+
+一個需求要同時改兩個 repo（例如後端加 API、前端用它）時，在其中一個 repo 跑一次 `/bombolt:bb-plan` 就好。
+
+- **先設定**：兩個 repo 都要跑過 `bb-setup`。在 `.claude/bombolt.md` 的 `related_repos` 寫上常一起改的 repo（`owner/name`），
+  bb-plan 遇到這種需求就會想到要跨 repo；沒寫也可以在需求裡直接說。
+- **規劃**：一個 session 規劃兩邊，介面契約只決定一次，最後開出兩個 issue（各在自己的 repo）並互相連結。
+  - 關係有兩種：上游／下游（例如前端等後端的 API），以及平行（沒有先後）。
+  - 另一個 repo 要在本機有主 checkout：會先從你用 Claude Code 開過的資料夾找，找不到再問你路徑。
+  - 規劃途中會請你執行一次 `/add-dir <另一個 repo>`，讓這個 session 讀得到它。
+- **實作**：兩個 issue 各自在自己 repo 的主 checkout 跑 `/bombolt:bb-work <n>`。
+  下游的上游還沒完成時，會先問你要停下來，還是照 issue 寫好的介面先開工。
+  - 「完成」的定義：上游的 PR 已經 merge，而且已經進了上游的 `base_branch`。
+  - 先開工的話，PR 最上面會寫「要等上游進 base 才能 merge」；發 PR 前會再查一次上游，介面變了就跟著改。
+- **查狀態**：`/bombolt:bb-list` 會在有配對的 issue 下面多一列，顯示對方的 repo、編號和狀態（例如「🔵 PR #30 審查中」「✅ 已進 `main`」）。
+- 一個 issue 只能配一個別的 repo 的 issue。merge 的先後由人決定：bombolt 只提醒、不擋。
 
 ### 親手測 PR：開 sandbox
 
@@ -408,6 +426,11 @@ bombolt 所有的 GitHub 操作（開 issue、發 PR、留言、附圖）都經�
   讀不到時這一項會失效，但另外的保留條件（未 commit、未 push、PR 未 merge、worktree 被 lock）仍然有效。
 - `bb_sweep.py` 沒給路徑時，從 `~/.claude.json` 找本機的 repo，這也不是官方文件記載的介面。
   讀不到時會退回目前所在的 repo；這時請直接給 repo 路徑。
+- 跨 repo 規劃時，從 `~/.claude.json` 找另一個 repo 在本機的位置（同一個非官方介面）；找不到會問你路徑。
+- 跨 repo 的成對 issue 用目前 repo 的 GitHub 帳號查另一個 repo。兩個 repo 分屬不同帳號（公司／個人）時查不到，
+  bb-list 顯示「❓ 查不到」，bb-work 會先問你。
+- 上游如果用 `pr_base`（例如 release），之後再用 squash 併進 `base_branch`，原本的 merge commit 不會出現在 `base_branch` 的歷史裡。
+  這時 bombolt 會一直判斷成「還沒進 base」，只能由你在 bb-work 問的時候選擇先開工。
 - `gh --attach` 上傳的圖片在私有 repo 裡誰看得到，以 GitHub 的權限為準。
 - UI 驗收需要專案有「不碰真實資料就能登入」的方法（寫在 `.claude/bombolt.md`）。沒有的話，UI 類的完成條件會被標成「無法驗證」。
 - 在 Claude Code 的 session 裡，腳本連 GitHub 有時會拿不到你的 SSH key（`Permission denied (publickey)`，自己在終端機跑卻正常）。

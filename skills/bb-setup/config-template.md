@@ -31,6 +31,10 @@ secret_paths:
 # 安全守門：除了內建的（kubectl、vercel --prod、Slack/LINE/寄信 API…），這個 repo 另外禁止的指令（regex）
 deny_commands:
 {{deny_commands}}
+
+# 常跟這個 repo 一起改的 repo（owner/name），例如前端配後端。bb-plan 遇到要兩邊一起改的需求時，
+# 會一次開出兩個互相連結的 issue（跨 repo 的成對 issue）。沒有就留空 []。
+related_repos: [{{related_repos}}]
 ---
 
 # bombolt 專案設定：{{repo_name}}

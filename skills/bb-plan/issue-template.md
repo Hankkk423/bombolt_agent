@@ -18,6 +18,11 @@ bombolt issue 模板。讀者是「明天接手、完全沒有這次對話記憶
 
 {{為什麼要做、現在的行為是什麼（附檔案:行號）、使用者原本的描述}}
 
+## 🔗 配對 issue
+
+{{跨 repo 的成對 issue 才有（寫法見 bb-plan 的「跨 repo 的成對 issue」）：對方 issue 的網址（`{{pair_url}}`，開好之後回填）、
+關係（對方是上游／下游／平行）、兩邊共用的介面契約（兩份 issue 寫同一段）、merge 順序。其他 issue 寫「無」}}
+
 ## 🐞 問題與根因
 
 {{排查出來的 bug 才有（寫法見 bb-plan 的 debug.md）：重現步驟、根因（`path:line`）與證據、為什麼之前沒被抓到。其他 issue 寫「無」}}
@@ -87,4 +92,5 @@ claude -n bb-{{repo}}-{{issue_number}}-{{slug}} --permission-mode auto "/bombolt
 省略 `--permission-mode auto` 也能跑，只是每個動作都會先問你才做。
 想先看看有哪些 issue 可以認領：`/bombolt:bb-list`。
 
+<!-- 成對 issue 才在 meta 加 "pair":{"url":"{{pair_url}}","relation":"depends_on|blocks|parallel"}（depends_on：這個要等對方；blocks：對方在等這個；parallel：沒有先後） -->
 <!-- bombolt:meta {"base":"{{base}}","base_sha":"{{base_sha}}","slug":"{{slug}}","ui":{{true|false}},"planned_at":"{{date}}"} -->

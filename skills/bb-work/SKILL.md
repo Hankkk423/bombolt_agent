@@ -20,7 +20,7 @@ disable-model-invocation: true
 ## 原則
 
 - **完全自主**：使用者已經在規劃階段回答完所有問題，這裡不要再問人。
-  例外只有：第 1 步發現別人在做、或要重做時，下面的「停工提問」後門，以及安全守門擋下來的動作。
+  例外只有：第 1 步發現別人在做、要重做、或跨 repo 配對的上游還沒完成時，下面的「停工提問」後門，以及安全守門擋下來的動作。
 - **完成 ＝ issue 的「🏁 完成定義」每一條都有證據地通過**（AI 不能做的標 ⚠️ 交給人測，見第 7 步），而且獨立 reviewer 沒有 blocking 問題。
   不是「code 寫完了」，也不是「應該沒問題」。
 - **只做 issue 範圍內的事**。看到別的問題寫進 PR 的 Follow-up，不要順手改。
@@ -67,12 +67,35 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/bb_issues.py" status --issue $0
   | `merged`／`closed` | 做完了 | 停下來告訴使用者 |
 
   這幾個停下來、問使用者的地方，是「不要問人」原則的例外：它們發生在動手之前，而且接手、重做都會影響別人或刪東西。
+- **跨 repo 的成對 issue**（`status` 回傳的 `pair` 不是 null）：照下面的「配對的依賴檢查」做完再認領。
 - 認領（在 issue 上建立或更新 bombolt 狀態留言，並把自己加成 assignee）：
   ```bash
   python3 "${CLAUDE_PLUGIN_ROOT}/scripts/bb_issues.py" mark --issue $0 --event claim \
     --branch bb-$0-<slug> --session-id ${CLAUDE_SESSION_ID}
   ```
   接手時 `--event takeover`；`mine` 不用跑。
+
+#### 配對的依賴檢查（`pair` 不是 null 才做）
+
+這個 issue 跟另一個 repo 的 issue 是一組，介面契約寫在 issue 的「🔗 配對 issue」。
+`pair.relation` 是這個 issue 對對方的關係：`depends_on`（對方是上游，要等它）、`blocks`（對方是下游，在等這個）、`parallel`（沒有先後）。
+
+**什麼時候做**：`verdict` 是 `free`、使用者選了接手，或是 `redo`。`redo` 要在「重做」第 1 步**之前**做，不能等刪完東西才問。
+`mine`（session 重開）不用再做，照 `<artifacts>/progress.md` 記的決定。
+
+1. **讀對方**：`bb-gh issue view <pair.url> --json title,body,comments`。`pair.merged_pr` 不是 null 的話，
+   再讀實際的介面：`bb-gh pr diff <pair.merged_pr> -R <pair.repo>`。
+   - 實際的介面跟 issue 寫的不一樣，以已經 merge 的 code 為準，差異寫進 PR 的「為什麼這樣做」。
+   - 讀不到（指令失敗，例如對方 repo 屬於另一個 GitHub 帳號、沒有權限）：
+     - `depends_on`：下一步一定會問人（這時 `pair.verdict` 也是 `unknown`）。
+     - `blocks`／`parallel`：不問，照 issue 的介面契約做；PR 的「為什麼這樣做」註明「讀不到對方 issue／PR：<錯誤摘要>」。
+2. **`waiting` 是 true**（上游還沒進它的 base、查不到、或配對資料格式不對）→ 停下來先問人。
+   把 `pair.message` 給使用者看；`pair.in_base` 是 false 代表上游的 PR 已經 merge，但還沒進它的 `base`。
+   然後用 AskUserQuestion 問：「停下來」（建議）／「照 issue 寫好的介面先開工」。
+   - 停下來 → 不認領，這個 session 到此結束。
+   - 開工 → 照常認領。這個決定在第 2 步建好 worktree 之後寫進 `<artifacts>/progress.md`。
+3. 不管有沒有問，都把這次讀到的 `pair.merged_pr`（可能是 null）記進 `<artifacts>/progress.md`。
+   第 8 步要拿它比對；compact 或 session 重開之後，只有這裡查得到。
 
 #### 重做（`verdict` 是 `redo`）
 
@@ -188,6 +211,15 @@ git diff --stat <meta.base_sha> origin/<base>
 
 ### 8. 發 PR
 
+0. **成對 issue 先重查對方**（`pair` 不是 null 才做）：實作可能跑了好幾個小時，對方的狀態可能變了。
+   重跑 `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/bb_issues.py" status --issue $0`：
+   - `pair.merged_pr` 跟 `progress.md` 記的不一樣（對方有新 merge 的 PR）→ 讀它的 diff。
+     實際的介面跟這次的寫法不同 → 修正 code，照第 7 步重新驗收，差異寫進「為什麼這樣做」。
+   - 第 1 步選了「依契約先開工」、而 `pair.satisfied` 現在還不是 true → PR 內文最上面加一行警告：
+     `> ⚠️ 依賴 <pair.url>：要等它的 PR 進到 <pair.base> 之後才能 merge。`
+     - `pair.base` 是 null：改成「要等它的 PR merge」。
+     - `pair.repo` 是 null（配對資料格式不對）：改寫成 `> ⚠️ 配對資料格式不對：<pair.url>，merge 前請確認依賴。`
+   - 「為什麼這樣做」加一行配對資訊：`🔗 <上游／下游／平行>：<pair.url>`（指對方的角色）。
 1. `git push -u origin <branch>`
 2. 照 [pr-template.md](pr-template.md) 寫 PR 內文到 `<artifacts>/pr-body.md`。
    - 標題：`<type>(<範圍>): <一句話> (#<issue>)`（跟 issue 標題同一個格式，最後加上 issue 編號），簡短清楚。

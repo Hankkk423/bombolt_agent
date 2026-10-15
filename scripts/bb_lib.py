@@ -73,6 +73,31 @@ def main_checkout(cwd: str | Path) -> Optional[Path]:
     return common_path.parent
 
 
+def claude_projects() -> List[str]:
+    """~/.claude.json 記的每個專案目錄（Claude Code 開過的資料夾）；讀不到回空清單。
+
+    ⚠️ ~/.claude.json 不是官方文件記載的介面，格式可能改變；找不到時使用者可以自己給路徑。
+    Example: claude_projects() == ["/Users/me/work/api", "/Users/me/work/web"]
+    """
+    try:
+        data = json.loads((Path.home() / ".claude.json").read_text(encoding="utf-8"))
+        return list(data.get("projects") or {})
+    except (OSError, ValueError, AttributeError, TypeError):
+        return []
+
+
+def repo_slug(remote_url: str) -> str:
+    """remote URL → 小寫的 `owner/name`，不管 host（ssh host alias 也認得）。
+
+    Example: repo_slug("git@github-work:Acme/API.git") == "acme/api"
+    """
+    path = remote_url.strip().rstrip("/")
+    if path.endswith(".git"):
+        path = path[:-4]
+    parts = path.replace(":", "/").split("/")
+    return "/".join(parts[-2:]).lower() if len(parts) >= 2 else ""
+
+
 def worktree_git_dir(cwd: str | Path) -> Optional[Path]:
     """回傳目前這個 worktree 自己的 git dir（linked worktree 是 .git/worktrees/<name>）。"""
     try:
@@ -149,7 +174,8 @@ def _read_config_file(path: Path) -> Optional[Dict[str, Any]]:
 
 def _parse_config(text: str) -> Dict[str, Any]:
     cfg = parse_frontmatter(text)
-    for key in ("protected_branches", "integration_branches", "copy_files", "secret_paths", "deny_commands"):
+    for key in ("protected_branches", "integration_branches", "copy_files", "secret_paths", "deny_commands",
+                "related_repos"):
         value = cfg.get(key)
         if value is None:
             cfg[key] = []

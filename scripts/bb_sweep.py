@@ -454,17 +454,9 @@ def render(report: Dict[str, Any], apply: bool, remove_snapshots: bool = False) 
 
 
 def known_repos() -> List[str]:
-    """~/.claude.json 記的每個專案目錄 → 主 checkout，只留有 .claude/worktrees/ 的；讀不到回空清單。
-
-    ⚠️ ~/.claude.json 不是官方文件記載的介面，格式可能改變；找不到時使用者可以自己給路徑。
-    """
-    try:
-        data = json.loads((Path.home() / ".claude.json").read_text(encoding="utf-8"))
-        projects = list(data.get("projects") or {})
-    except (OSError, ValueError, AttributeError, TypeError):
-        return []
+    """~/.claude.json 記的每個專案目錄 → 主 checkout，只留有 .claude/worktrees/ 的；讀不到回空清單。"""
     repos = []
-    for p in projects:
+    for p in bb_lib.claude_projects():
         repo = bb_lib.main_checkout(p) if Path(p).is_dir() else None
         if repo and (repo / bb_lib.WORKTREES_REL).is_dir():
             repos.append(str(repo))
