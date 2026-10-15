@@ -73,6 +73,10 @@ argument-hint: "[可選：補充說明]"
    網址、部署要多久、怎麼確認 stage 上已經是某個 commit、stage 的測試帳號）還是本機？有沒有每次都要人看的項目？（→「人工測試」一節）
    本機的話，再問在外面用手機測（外網 sandbox）時要開哪個 port、啟動時要多加什麼，照調查結果給建議（→「Sandbox（外網測試）」一節）。
 8. **排查資源**：排查使用者回報的問題時，agent 可以用什麼**唯讀**的方式看 log、錯誤追蹤、資料？沒有就寫「無」（→「排查資源」一節）。
+9. **常一起改的 repo**：這個 repo 常跟哪些 repo 一起改（例如前端與後端）？（multiSelect，選項含「無」；→ `related_repos`）
+   有填的話，bb-plan 遇到要兩邊一起改的需求時，會一次開出兩個互相連結的 issue。
+   建議值：先用 `bb-gh repo view --json owner -q .owner.login` 取得 owner，再從 `bb-gh repo list <owner> --limit 30` 挑名稱相近的。
+   一律用 `bb-gh`，不要直接呼叫 `gh`：有設定 `github.user` 的機器會被安全守門擋。
 
 第 3 步的「忽略清單」與第 4 步的「commit／settings.json／關 issue 的 workflow」問題，併進最後一輪一起問。
 模板裡其他欄位（專案知識、commit 慣例、截圖慣例）用第 1 步的調查結果填；調查不出來、又會影響實作的，才加進題目問。

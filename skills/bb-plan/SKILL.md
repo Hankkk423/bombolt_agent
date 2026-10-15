@@ -78,7 +78,7 @@ $ARGUMENTS
   - gh 沒裝或版本太舊 → 請使用者在提示列輸入 `! brew install gh` 或 `! brew upgrade gh`，等他完成。
   - gh 沒登入 → 請使用者在提示列輸入 `! gh auth login`，等他完成。
 - 讀「設定檔」那一行說的那份 `.claude/bombolt.md`（通常是 `git show origin/<base>:.claude/bombolt.md`；
-  說用本機的才讀主 checkout 那份），知道這個 repo 的 base branch、閘門、怎麼啟動與登入。之後提到它都指這一份。
+  說用本機的才讀主 checkout 那份），知道這個 repo 的 base branch、閘門、怎麼啟動與登入、常一起改的 `related_repos`。之後提到它都指這一份。
 
 ### 1. 用一句話覆述需求
 
@@ -108,6 +108,9 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/bb_snapshot.py" create
 - 可能被連帶影響的地方（呼叫端、共用元件、型別、文件）
 
 你自己也要讀最關鍵的幾個檔，不要只看 subagent 的摘要。
+
+**要不要跨 repo**：設定檔有 `related_repos`、或使用者提到別的 repo 時，判斷需求要不要也改另一個 repo。
+要的話照 [pair.md](pair.md) 準備對方的 repo，規劃兩份**成對 issue**。之後每一步都對兩份做，並照 pair.md 的補充。
 
 ### 4. scope 判斷
 
@@ -148,6 +151,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/bb_snapshot.py" create
 - 相容：會不會影響既有使用者、其他頁面、API 呼叫端、資料格式
 - 技術：要不要新增依賴、狀態放哪裡、要不要後端配合
 - 驗收：怎麼證明做對了（哪個測試、哪個操作、哪張截圖）
+- 跨 repo（成對 issue 才有）：兩邊的介面契約、上游先上線時的相容
 
 ### 7. 寫 issue 草稿
 
@@ -160,6 +164,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/bb_snapshot.py" create
 - repo 有自動測試框架時，新增或改變的行為要在 DoD 裡要求對應的測試（寫出要測什麼）；沒有的話用瀏覽器操作或指令驗證代替，並說明為什麼。
 - UI 改動一定要有截圖計畫；純後端改動寫「無」並在 DoD 用測試證據代替。
 - 排查出來的 bug：照 [debug.md](debug.md) 寫「🐞 問題與根因」一節（含重現測試的 DoD）；其他 issue 那一節寫「無」。
+- 成對 issue：照 [pair.md](pair.md) 寫「🔗 配對 issue」一節與 meta 的 `pair`；其他 issue 那一節寫「無」、meta 不加 `pair`。
 - 要限制改動範圍的話，DoD 用 `git diff --stat origin/<base>...HEAD`（三個點：只看這條 branch 自己的改動，base 之後又前進也不受影響）。
 - repo 自己有「收尾規則」（例如每次改動都要更新某份文件、寫決策紀錄）時，逐條決定要列進「要做」還是「⛔ 不做」，並寫出理由——不要讓實作者自己猜。
 - issue 標題照下面第 9 步的格式；commit message 則照 repo 既有的慣例（`.claude/bombolt.md` 的「commit 與 PR 慣例」）。
@@ -170,6 +175,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/bb_snapshot.py" create
 派 `bombolt:bb-cold-reader` subagent，只給它：**草稿檔路徑、快照路徑、`.claude/bombolt.md` 路徑**
 （快照裡的 `<快照路徑>/.claude/bombolt.md`；設定還不在 origin 上時，快照裡沒有，才給主 checkout 那份）。
 （不要給它這次對話的任何摘要——它的價值就在於它不知道你知道什麼。）
+成對 issue 另外給它對方的草稿路徑（只當參考），見 [pair.md](pair.md)。
 
 它會回報兩種問題：
 - **A 類（codebase 查得到答案）**：你去確認，然後直接補進草稿。
@@ -182,6 +188,8 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/bb_snapshot.py" create
 補完之後**再冷讀一次**，直到它回報「沒有需要猜的地方」為止（最多 3 輪；第 3 輪還有，就把剩下的明確列給使用者看，請他裁決要不要照樣開 issue）。
 
 ### 9. 給使用者確認，然後開 issue
+
+成對 issue：兩份一起確認，開的順序、對 B 的指令與回填照 [pair.md](pair.md)。
 
 1. 給使用者看：標題、目標、範圍、DoD 的條數與截圖計畫的畫面數、「預設決定」的完整清單。
 2. 用 AskUserQuestion 問：「照這樣開 issue？」（選項：開 issue／我要修改某個部分）。
@@ -199,7 +207,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/bb_snapshot.py" create
 
 ### 10. 收尾
 
-1. 刪掉快照：`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/bb_snapshot.py" remove <快照路徑>`
+1. 刪掉快照：`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/bb_snapshot.py" remove <快照路徑>`（成對 issue 兩份都刪，見 [pair.md](pair.md)）
 2. 告訴使用者：
    - issue 的網址
    - **下一步**（在 repo 的主 checkout 執行，`<n>` 是 issue 編號）：

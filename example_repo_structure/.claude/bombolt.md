@@ -32,6 +32,10 @@ secret_paths:
 deny_commands:
   - npm run deploy
   - npm run db:migrate:prod
+
+# 常跟這個 repo 一起改的 repo（owner/name），例如前端配後端。bb-plan 遇到要兩邊一起改的需求時，
+# 會一次開出兩個互相連結的 issue（跨 repo 的成對 issue）。沒有就留空 []。
+related_repos: []
 ---
 
 # bombolt 專案設定：myapp
