@@ -1,0 +1,12 @@
+{
+  "kind": "fix",
+  "title": "feat(cli): todo list 結尾印摘要（共 N 項、M 項未完成）",
+  "slug": "list-summary",
+  "ui": false,
+  "description": "bb-fix 遇到衝突：PR 開好之後 main 合了同事的 #87（list --pending），跟 PR 改同一段而衝突。要照 bb-fix 先同步最新的 main、解衝突時保留雙方意圖（--pending 不能被吃掉），再處理 review 的小要求，並在 PR 留言說明解了什麼衝突、PR 現在也包含 #87。",
+  "allowed_paths": ["todo/cli.py", "tests/*"],
+  "tags": ["fix", "conflict", "sync"],
+  "pr_title": "feat(cli): todo list 結尾印摘要（共 N 項、M 項未完成） (#{{issue}})",
+  "main_advance_message": "feat(cli): add --pending option to list (#87)",
+  "main_advance_author": "Amy Lin <amy@example.com>"
+}

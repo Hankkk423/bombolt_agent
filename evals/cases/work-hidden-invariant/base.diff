@@ -1,0 +1,99 @@
+diff --git a/tests/test_store.py b/tests/test_store.py
+index e0ca068..5977232 100644
+--- a/tests/test_store.py
++++ b/tests/test_store.py
+@@ -1,3 +1,4 @@
++import json
+ import os
+ import tempfile
+ import unittest
+@@ -42,6 +43,15 @@ class StoreTest(unittest.TestCase):
+         self.store.delete(1)
+         self.assertEqual(self.store.list(), [])
+ 
++    def test_reads_v1_file(self):
++        with open(self.store.path, "w", encoding="utf-8") as f:
++            json.dump({"next_id": 2, "todos": [{"id": 1, "title": "a", "done": False,
++                                                "created_at": "2026-10-01T09:00:00"}]}, f)
++        self.assertIsNone(self.store.get(1)["due"])
++        self.store.add("b")
++        with open(self.store.path, encoding="utf-8") as f:
++            self.assertEqual(json.load(f)["version"], 2)
++
+     def test_missing_id(self):
+         with self.assertRaises(NotFound):
+             self.store.set_done(99)
+diff --git a/todo/CLAUDE.md b/todo/CLAUDE.md
+new file mode 100644
+index 0000000..3cdf4e5
+--- /dev/null
++++ b/todo/CLAUDE.md
+@@ -0,0 +1,8 @@
++# todo/ 的規則：資料檔的格式
++
++- 資料檔有版本（`todo/store.py` 的 `SCHEMA_VERSION`）。使用者手上有舊版的資料檔，讀不進來或讀錯就是資料遺失。
++- **改格式**（加欄位、改欄位的意思或型別）一定要一起做這三件事：
++  1. `SCHEMA_VERSION` 加一。
++  2. 在 `MIGRATIONS` 補上「上一版 → 這一版」的函式，把舊資料補成新格式（例如新欄位補上預設值）。
++     讀取的程式碼一律假設資料已經是最新版，不要在各處用 `.get(欄位, 預設值)` 補洞。
++  3. 在 `tests/test_store.py` 補一個「讀上一版的檔案」的測試。
+diff --git a/todo/store.py b/todo/store.py
+index 6ece5cd..70daada 100644
+--- a/todo/store.py
++++ b/todo/store.py
+@@ -1,7 +1,10 @@
+ """待辦事項的儲存：整份資料是一個 JSON 檔。
+ 
+-檔案格式：
+-    {"next_id": 3, "todos": [{"id": 1, "title": "...", "done": false, "due": "2026-10-20", "created_at": "2026-10-01T09:00:00"}]}
++檔案格式（第 2 版）：
++    {"version": 2, "next_id": 3, "todos": [{"id": 1, "title": "...", "done": false, "due": "2026-10-20", "created_at": "2026-10-01T09:00:00"}]}
++
++使用者手上可能還有舊版的檔案：讀進來時照 MIGRATIONS 一版一版升上來，寫回去就是最新版。
++要改格式，先看 todo/CLAUDE.md。
+ """
+ 
+ import json
+@@ -11,6 +14,30 @@ from datetime import datetime
+ from todo.dates import parse_due
+ 
+ 
++SCHEMA_VERSION = 2
++
++
++def _v1_to_v2(data):
++    # 第 1 版沒有 version 欄位，沒有到期日的待辦不一定有 due 這個 key
++    for todo in data["todos"]:
++        todo.setdefault("due", None)
++    return data
++
++
++# 第 n 版 → 第 n + 1 版
++MIGRATIONS = {1: _v1_to_v2}
++
++
++def migrate(data):
++    """把讀進來的資料升到最新版（SCHEMA_VERSION）。"""
++    version = data.get("version", 1)
++    while version < SCHEMA_VERSION:
++        data = MIGRATIONS[version](data)
++        version += 1
++    data["version"] = SCHEMA_VERSION
++    return data
++
++
+ class NotFound(Exception):
+     pass
+ 
+@@ -21,9 +48,9 @@ class TodoStore:
+ 
+     def _load(self):
+         if not os.path.exists(self.path):
+-            return {"next_id": 1, "todos": []}
++            return {"version": SCHEMA_VERSION, "next_id": 1, "todos": []}
+         with open(self.path, encoding="utf-8") as f:
+-            return json.load(f)
++            return migrate(json.load(f))
+ 
+     def _save(self, data):
+         # TODO: 改成先寫暫存檔再 os.replace，避免寫到一半當掉留下壞掉的檔案

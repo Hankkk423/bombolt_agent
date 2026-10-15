@@ -1,0 +1,105 @@
+diff --git a/tests/test_server.py b/tests/test_server.py
+index 2d2a4e6..e73de47 100644
+--- a/tests/test_server.py
++++ b/tests/test_server.py
+@@ -56,6 +56,15 @@ class ApiTest(ServerTestCase):
+         self.assertEqual(status, 400)
+         self.assertEqual(body["error"]["code"], "invalid_todo")
+ 
++    def test_create_with_priority(self):
++        status, body = self.json("POST", "/api/todos", {"title": "a", "priority": "high"})
++        self.assertEqual((status, body["todo"]["priority"]), (201, "high"))
++
++    def test_invalid_priority(self):
++        status, body = self.json("POST", "/api/todos", {"title": "a", "priority": "urgent"})
++        self.assertEqual(status, 400)
++        self.assertEqual(body["error"]["code"], "invalid_todo")
++
+     def test_done_unknown(self):
+         status, body = self.json("POST", "/api/todos/99/done")
+         self.assertEqual(status, 404)
+diff --git a/todo/cli.py b/todo/cli.py
+index f80f611..9bb93c5 100644
+--- a/todo/cli.py
++++ b/todo/cli.py
+@@ -16,12 +16,14 @@ def format_line(todo):
+     line = f"[{mark}] {todo['id']} {todo['title']}"
+     if todo["due"]:
+         line += f" (due {todo['due']})"
++    if todo.get("priority", "normal") != "normal":
++        line += f" [{todo['priority']}]"
+     return line
+ 
+ 
+ def cmd_add(store, args):
+     try:
+-        todo = store.add(args.title, args.due)
++        todo = store.add(args.title, args.due, args.priority)
+     except ValueError as e:
+         print(f"錯誤：{e}", file=sys.stderr)
+         return 1
+@@ -56,6 +58,7 @@ def build_parser():
+     add = sub.add_parser("add", help="新增待辦")
+     add.add_argument("title")
+     add.add_argument("--due", help="到期日 YYYY-MM-DD")
++    add.add_argument("--priority", choices=["high", "normal", "low"], default="normal", help="優先度")
+     sub.add_parser("list", help="列出全部待辦")
+     done = sub.add_parser("done", help="標記完成")
+     done.add_argument("id", type=int)
+diff --git a/todo/server.py b/todo/server.py
+index 58ad824..ab4782a 100644
+--- a/todo/server.py
++++ b/todo/server.py
+@@ -46,7 +46,7 @@ def error_body(code, message):
+ 
+ 
+ def to_json(todo, today_str):
+-    return dict(todo, overdue=is_overdue(todo, today_str))
++    return dict(todo, priority=todo.get("priority", "normal"), overdue=is_overdue(todo, today_str))
+ 
+ 
+ def render_item(todo, today_str):
+@@ -129,7 +129,7 @@ class Handler(BaseHTTPRequestHandler):
+                 self._send_json(400, error_body("invalid_json", "request body 要是 JSON 物件"))
+                 return
+             try:
+-                todo = self.store.add(payload.get("title"), payload.get("due"))
++                todo = self.store.add(payload.get("title"), payload.get("due"), payload.get("priority", "normal"))
+             except ValueError as e:
+                 self._send_json(400, error_body("invalid_todo", str(e)))
+                 return
+diff --git a/todo/store.py b/todo/store.py
+index 70daada..aa4b9be 100644
+--- a/todo/store.py
++++ b/todo/store.py
+@@ -38,6 +38,9 @@ def migrate(data):
+     return data
+ 
+ 
++PRIORITIES = ("high", "normal", "low")
++
++
+ class NotFound(Exception):
+     pass
+ 
+@@ -67,16 +70,19 @@ class TodoStore:
+                 return todo
+         raise NotFound(todo_id)
+ 
+-    def add(self, title, due=None):
++    def add(self, title, due=None, priority="normal"):
+         title = (title or "").strip()
+         if not title:
+             raise ValueError("title 不可以是空的")
++        if priority not in PRIORITIES:
++            raise ValueError("priority 只能是 high、normal、low")
+         data = self._load()
+         todo = {
+             "id": data["next_id"],
+             "title": title,
+             "done": False,
+             "due": parse_due(due),
++            "priority": priority,
+             "created_at": datetime.now().isoformat(timespec="seconds"),
+         }
+         data["todos"].append(todo)

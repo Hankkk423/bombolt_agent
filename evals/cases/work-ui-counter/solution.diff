@@ -1,0 +1,49 @@
+diff --git a/tests/test_server.py b/tests/test_server.py
+index e14cead..5b0be08 100644
+--- a/tests/test_server.py
++++ b/tests/test_server.py
+@@ -78,6 +78,20 @@ class PageTest(ServerTestCase):
+     def test_index_empty(self):
+         status, page = self.request("GET", "/")
+         self.assertIn("還沒有任何待辦事項", page)
++        self.assertNotIn('id="remaining"', page)
++
++    def test_remaining_counter(self):
++        for title in ("a", "b", "c"):
++            self.json("POST", "/api/todos", {"title": title})
++        self.json("POST", "/api/todos/1/done")
++        status, page = self.request("GET", "/")
++        self.assertIn('<p id="remaining" class="remaining">還有 2 項未完成</p>', page)
++
++    def test_remaining_all_done(self):
++        self.json("POST", "/api/todos", {"title": "a"})
++        self.json("POST", "/api/todos/1/done")
++        status, page = self.request("GET", "/")
++        self.assertIn('<p id="remaining" class="remaining">全部完成了</p>', page)
+ 
+ 
+ if __name__ == "__main__":
+diff --git a/todo/server.py b/todo/server.py
+index 58ad824..addeaf6 100644
+--- a/todo/server.py
++++ b/todo/server.py
+@@ -26,6 +26,7 @@ li.done .title {{ text-decoration: line-through; color: #888; }}
+ .due {{ color: #666; font-size: 0.9em; margin-left: 8px; }}
+ .overdue {{ color: #c00; font-weight: bold; margin-left: 8px; }}
+ form.inline {{ display: inline; margin-left: 8px; }}
++.remaining {{ color: #555; margin: 0 0 12px; }}
+ </style>
+ </head>
+ <body>
+@@ -66,7 +67,10 @@ def render_index(todos, today_str):
+     if not todos:
+         items = '<p class="empty">還沒有任何待辦事項</p>'
+     else:
+-        items = "<ul>\n" + "\n".join(render_item(t, today_str) for t in todos) + "\n</ul>"
++        pending = sum(1 for t in todos if not t["done"])
++        counter = f"還有 {pending} 項未完成" if pending else "全部完成了"
++        items = (f'<p id="remaining" class="remaining">{counter}</p>\n<ul>\n'
++                 + "\n".join(render_item(t, today_str) for t in todos) + "\n</ul>")
+     return PAGE.format(items=items)
+ 
+ 

@@ -1,0 +1,18 @@
+{
+  "threads": [
+    {
+      "path": "todo/cli.py",
+      "line": 42,
+      "author": "amy-reviewer",
+      "body": "全部都完成的時候，摘要改成 `共 N 項，全部完成`，不要印「0 項未完成」。"
+    }
+  ],
+  "reviews": [
+    {
+      "author": "amy-reviewer",
+      "state": "CHANGES_REQUESTED",
+      "body": "main 剛合了我的 #87（`todo list --pending`），這個 PR 現在跟 main 有 conflict，麻煩合一下最新的 main。合起來之後：`--pending` 時一樣只列未完成的，但摘要照全部的項目算（「共 N 項」是全部的數量）。另外摘要的文字見 inline comment。"
+    }
+  ],
+  "comments": []
+}

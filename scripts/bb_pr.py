@@ -9,7 +9,8 @@
 
 用法（N 可以是 PR 編號，也可以是 issue 編號）：
   bb_pr.py context --pr N [--session-id S]
-      接手需要的：PR、所有修改紀錄、沒有紀錄的 commit、最新的 commit 驗收過沒、有沒有人正在改、本機有沒有 worktree。
+      接手需要的：PR、所有修改紀錄、沒有紀錄的 commit、最新的 commit 驗收過沒、有沒有人正在改、本機有沒有 worktree，
+      以及要處理的意見（沒解決的 review thread、review 總評、最後一則紀錄之後的留言）與能不能合併（有沒有衝突）。
   bb_pr.py record --pr N --session-id S --kind round|catchup|sync --summary "一句話" --body-file F [--verified]
       貼一則修改紀錄（要先 push），然後更新 PR 內文的「🔁 要修改的話」。
       round：一輪修改（bb-work 發 PR 是第 1 輪）；catchup：補記沒有經過 bombolt 的 commit；sync：發版後同步。
@@ -47,6 +48,24 @@ HANDOFF_END = "<!-- bombolt:handoff:end -->"
 KINDS = ("round", "catchup", "sync")
 MAX_COMMITS = 30
 NOTES_HEADING = "**之後補充**"
+FEEDBACK_QUERY = """
+query($owner: String!, $repo: String!, $n: Int!) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $n) {
+      mergeable
+      mergeStateStatus
+      reviews(first: 100) { totalCount nodes { author { login } state body submittedAt url } }
+      reviewThreads(first: 100) {
+        totalCount
+        nodes {
+          id isResolved isOutdated path line
+          comments(first: 50) { totalCount nodes { databaseId author { login } body createdAt url } }
+        }
+      }
+    }
+  }
+}"""
+REPLY_RE = re.compile(r"^\s*(已修正於|未修改)")  # bb-fix 第 6 步回覆 thread 的開頭
 
 
 def fail(msg: str) -> None:
@@ -111,7 +130,7 @@ def parse_records(comments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             continue
         cid = bb_issues.COMMENT_ID_RE.search(c.get("url") or "")
         recs.append({**data, "url": c.get("url", ""), "comment_id": cid.group(1) if cid else "",
-                     "comment_body": c.get("body") or ""})
+                     "comment_body": c.get("body") or "", "created_at": c.get("createdAt", "")})
     return recs
 
 
@@ -139,6 +158,81 @@ def commits(repo: Path, rng: str) -> List[Dict[str, str]]:
         if len(parts) == 4:
             result.append({"sha": parts[0], "author": parts[1], "date": parts[2], "subject": parts[3]})
     return result
+
+
+def _author(node: Dict[str, Any]) -> str:
+    return ((node or {}).get("author") or {}).get("login") or ""
+
+
+def feedback(repo: Path, pr: Dict[str, Any], recs: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """PR 上要處理的意見：沒解決的 review thread、review 總評、最後一則紀錄之後的一般留言。
+    放進 context 是為了讓接手的 agent 在動任何 code（包括解衝突）之前，一定先看過 reviewer 說了什麼。"""
+    since = recs[-1].get("created_at", "") if recs else ""
+    result: Dict[str, Any] = {"threads": [], "reviews": [], "comments": [], "resolved_threads": 0,
+                              "mergeable": "", "merge_state": "", "truncated": False, "error": ""}
+    # 一般留言：pr view 已經帶回來了。bombolt 自己的紀錄不算
+    for c in pr.get("comments") or []:
+        if RECORD_RE.search(c.get("body") or "") or (since and (c.get("createdAt") or "") <= since):
+            continue
+        result["comments"].append({"author": _author(c), "body": c.get("body") or "", "url": c.get("url", ""),
+                                   "at": c.get("createdAt", "")})
+    try:
+        data = bb_issues.gh_json(repo, ["api", "graphql", "-f", f"query={FEEDBACK_QUERY}", "-F", "owner={owner}",
+                                        "-F", "repo={repo}", "-F", f"n={pr['number']}"])
+    except GhError as e:
+        result["error"] = str(e)
+        return result
+    node = (((data or {}).get("data") or {}).get("repository") or {}).get("pullRequest") or {}
+    result["mergeable"], result["merge_state"] = node.get("mergeable") or "", node.get("mergeStateStatus") or ""
+    reviews = node.get("reviews") or {}
+    for r in reviews.get("nodes") or []:
+        body, state = (r.get("body") or "").strip(), r.get("state") or ""
+        if state == "PENDING" or not (body or state == "CHANGES_REQUESTED"):
+            continue
+        at = r.get("submittedAt") or ""
+        result["reviews"].append({"author": _author(r), "state": state, "body": body, "url": r.get("url", ""),
+                                  "at": at, "new": not since or at >= since})
+    threads = node.get("reviewThreads") or {}
+    for t in threads.get("nodes") or []:
+        if t.get("isResolved"):
+            result["resolved_threads"] += 1
+            continue
+        cs = (t.get("comments") or {}).get("nodes") or []
+        result["threads"].append({
+            "id": t.get("id", ""), "path": t.get("path"), "line": t.get("line"), "outdated": bool(t.get("isOutdated")),
+            "reply_to": cs[0].get("databaseId") if cs else None,
+            "answered": bool(cs) and bool(REPLY_RE.match(cs[-1].get("body") or "")),
+            "comments": [{"author": _author(c), "body": c.get("body") or "", "url": c.get("url", ""),
+                          "at": c.get("createdAt", "")} for c in cs]})
+        if (t.get("comments") or {}).get("totalCount", len(cs)) > len(cs):
+            result["truncated"] = True
+    for conn in (reviews, threads):
+        if conn.get("totalCount", 0) > len(conn.get("nodes") or []):
+            result["truncated"] = True
+    return result
+
+
+def feedback_messages(fb: Dict[str, Any], base: str) -> List[str]:
+    if fb["error"]:
+        return [f"⚠️ 讀不到 review（{fb['error']}）：照第 2 步的指令手動讀，**不要跳過**。"]
+    msgs = []
+    threads = fb["threads"]
+    answered = sum(1 for t in threads if t["answered"])
+    new_reviews = sum(1 for r in fb["reviews"] if r["new"])
+    if threads or new_reviews or fb["comments"]:
+        waiting = f"（其中 {answered} 個上一輪已經回覆、在等 reviewer）" if answered else ""
+        msgs.append(f"PR 上要看的意見：沒解決的 review thread {len(threads)} 個{waiting}、"
+                    f"上一則紀錄之後的 review 總評 {new_reviews} 則、新留言 {len(fb['comments'])} 則。"
+                    "動任何 code（包括解衝突）之前，先照第 2 步全部讀完、整理成清單。")
+    else:
+        msgs.append("PR 上沒有新的 review 意見（沒解決的 thread、上一則紀錄之後的 review 總評與留言都沒有）。")
+    if fb["truncated"]:
+        msgs.append("⚠️ review 或 thread 太多，沒有全部讀回來：用第 2 步的指令分頁讀完。")
+    if fb["mergeable"] == "CONFLICTING":
+        msgs.append(f"⚠️ 這個 PR 跟 `{base}` 有衝突：第 3 步解。怎麼解可能已經寫在 review 裡，先讀完第 2 步。")
+    elif fb["mergeable"] == "UNKNOWN":
+        msgs.append("GitHub 還在算這個 PR 能不能合併（UNKNOWN）：第 3 步再查一次。")
+    return msgs
 
 
 def short(sha: str) -> str:
@@ -347,6 +441,9 @@ def cmd_context(args: argparse.Namespace) -> None:
         if not lock["this_session"]:
             msgs.append(f"{lock['owner_text']}上從 {lock['since']} 開始在修改這個 PR（還沒有改回「審查中」）。")
 
+    fb = feedback(repo, pr, recs)
+    msgs += feedback_messages(fb, base)
+
     wt = repo / bb_lib.WORKTREES_REL / branch
     out(status="ok",
         pr={"number": pr["number"], "url": pr.get("url", ""), "title": pr.get("title", ""), "state": pr.get("state", ""),
@@ -355,7 +452,7 @@ def cmd_context(args: argparse.Namespace) -> None:
         records=[{k: r.get(k) for k in ("kind", "n", "summary", "date", "from", "to", "verified", "session", "url")}
                  | {"who": bb_lib.owner_text(r.get("owner") or {}), "comment": r["comment_body"]} for r in recs],
         unrecorded_commits=unrecorded, history_rewritten=rewritten, verified_head=verified_head,
-        lock=lock, local_worktree=str(wt) if wt.is_dir() else None, messages=msgs)
+        lock=lock, local_worktree=str(wt) if wt.is_dir() else None, feedback=fb, messages=msgs)
 
 
 def cmd_record(args: argparse.Namespace) -> None:

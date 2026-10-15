@@ -1,0 +1,36 @@
+{
+  "threads": [
+    {
+      "path": "todo/store.py",
+      "line": 78,
+      "author": "bob-dev",
+      "body": "這行不管 PATCH 有沒有帶 `due` 都會覆寫：只改標題（`{\"title\": \"x\"}`）的話，`payload.get(\"due\")` 是 None，原本的到期日就被清掉了。issue 寫的是「沒帶的欄位保持原樣」。"
+    },
+    {
+      "path": "todo/server.py",
+      "line": 173,
+      "author": "amy-pm",
+      "body": "我是這個 issue 的需求負責人，這條我決定改需求：PATCH 也要能改 `done`（`true`／`false`），手機 app 的「取消完成」要用它（現在沒有任何方法把完成改回未完成）。issue 原本寫帶 `done` 回 400，這條作廢。`done` 不是布林值的話一樣回 400 `invalid_todo`；`id`、`created_at` 這些其他欄位還是一樣回 400。"
+    },
+    {
+      "path": "todo/server.py",
+      "line": 182,
+      "author": "bob-dev",
+      "body": "小建議：這個 PR 新加的這幾個 400，body 直接回 `{\"message\": \"...\"}` 就好吧？前端只會把 message 秀出來，`error.code` 沒在用，包兩層有點囉嗦。",
+      "expect": "decline"
+    }
+  ],
+  "reviews": [
+    {
+      "author": "amy-pm",
+      "state": "CHANGES_REQUESTED",
+      "body": "`done` 的需求我改了，見 inline（以我在 review 寫的為準）。bob 的兩個意見也請看一下，改完我再看一次。"
+    },
+    {
+      "author": "bob-dev",
+      "state": "COMMENTED",
+      "body": "大致 OK，留了兩個意見。"
+    }
+  ],
+  "comments": []
+}

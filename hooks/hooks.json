@@ -3,7 +3,7 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Bash|Read|Edit|Write|NotebookEdit",
+        "matcher": "Bash|Read|Edit|Write|NotebookEdit|ScheduleWakeup",
         "hooks": [
           {
             "type": "command",

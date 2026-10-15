@@ -27,8 +27,12 @@ disable-model-invocation: true
 - **最小改動、照 coding style**：用最簡單、但能完整達成 issue 的做法。只改需要改的行，
   不重排、不改名、不動無關的註解或格式；新寫、改寫的程式碼照 [coding-style.md](coding-style.md)（issue 另有決定就照 issue）。
   issue 寫出了程式碼就照著寫，不要自己「改良」。不加 issue 沒要求的抽象、參數、設定或防呆。
-- **在 worktree 裡，git 指令一條一條單獨執行**：Claude Code 的 worktree 隔離會拒絕它無法確認「git 只作用在 worktree 內」的指令，
-  例如用 `&&` 把 `make` 和 `git` 串在一起。被拒絕時拆開重跑就好，不要想辦法繞過。
+- **在 worktree 裡下指令**：Claude Code 的 worktree 隔離會拒絕它無法確認「git 只作用在 worktree 內」的指令，
+  多半是含 heredoc、shell 變數、`$(…)` 或 `eval` 的指令（`&&`、`|`、`>` 本身沒問題）。這兩種換個寫法就不會被擋，步驟也不會變多：
+  - 寫檔用 Write，不要用 `cat > 檔案 <<EOF`。
+  - 路徑直接寫完整，不要先設變數縮短（`S=…/scripts; python3 $S/…`）。
+
+  其他被拒絕的，拆成單純的指令重跑就好。不要想辦法繞過：被擋的 git 操作不要包進腳本檔再執行。
 - 所有溝通、commit 以外的文字（PR、issue 留言）用繁體中文。
 
 ## 步驟
@@ -161,6 +165,9 @@ git diff --stat <meta.base_sha> origin/<base>
      並逐段對照 `<artifacts>/walkthrough.md` 跟 code、檢查 `<artifacts>/test-guide.md` 有沒有漏測
      （呼叫時給它這兩個路徑，以及 [coding-style.md](coding-style.md) 的完整路徑）。
    - 重做時沿用了被關掉的 PR 的需求調整：兩個都要一起給（完成標準是 issue 的完成定義 ＋ 這些調整）。
+
+   **兩個都回報之後才改 code**：verifier 驗到一半 code 變了，那一次就白驗了。
+   先回來的那個，可以先照第 4 步確認它的發現、想好怎麼改。
 4. **不要照單全收**：reviewer 的每一個 blocking 問題你都要自己確認是真的（打開 code、想出失敗情境）。
    確認是真的才修；判斷不是問題的，在 PR 的「請你重點看」說明你為什麼不改。
 5. 有 DoD 沒過、照指南操作發現 code 的問題、或有確認過的 blocking 問題 → 修，然後進下一輪。
@@ -170,6 +177,8 @@ git diff --stat <meta.base_sha> origin/<base>
    reviewer 只回報指南漏測、code 本身沒問題：補進指南，再派 verifier 只照新加的步驟做一次，不用整輪重跑。
 
 **結束條件**：verifier 回報全部通過 **且** 沒有確認過的 blocking 問題 → 進第 8 步。
+- verifier 全部通過的必須是**現在的 HEAD**。通過之後又 commit（就算只動測試）就要再派 verifier 驗一次。
+  non-blocking 的建議要採納，就在派下一輪之前一起改；不值得為它多跑一輪的，寫進 PR 的「請你重點看」。
 - verifier 要有實際啟動服務操作過；沒有的話要寫出不適用或啟動不了的理由（port 被佔、缺依賴這類環境問題先自己排除再重跑）。
 - DoD 或指南的步驟標 ⚠️ 無法驗證、原因不是 code（例如操作會真的寄信、扣款，或設定檔沒寫怎麼登入）：
   不算沒過，改 code 也修不好。移進指南的「要你測的」並寫出原因，照常發 PR、照常整合。

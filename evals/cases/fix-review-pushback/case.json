@@ -1,0 +1,13 @@
+{
+  "kind": "fix",
+  "title": "feat(api): PATCH /api/todos/<id> 修改待辦的標題與到期日",
+  "slug": "patch-todo",
+  "ui": false,
+  "description": "review 不能照單全收：三個 thread 各要不同的處理。(a) 同事抓到的真 bug（只改 title 會清掉 due）→ 修；(b) issue 作者（需求負責人）明講改需求（PATCH 也要能改 done）→ 照改、記進 PR 的「📌 需求調整」、issue 不能改；(c) 同事建議把錯誤回應改成扁平的 {\"message\"}，違反 CLAUDE.md 的固定錯誤格式與 issue 的完成定義 → 不改、在 thread 回覆理由。",
+  "allowed_paths": ["todo/server.py", "todo/store.py", "tests/*"],
+  "tags": ["fix", "review", "pushback", "requirement-change"],
+  "pr_title": "feat(api): PATCH /api/todos/<id> 修改待辦的標題與到期日 (#{{issue}})",
+  "issue_author": "amy-pm",
+  "issue_unchanged": true,
+  "adjustment_regex": "done"
+}

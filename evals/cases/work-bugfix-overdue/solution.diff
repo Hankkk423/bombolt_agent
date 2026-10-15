@@ -1,0 +1,24 @@
+diff --git a/tests/test_dates.py b/tests/test_dates.py
+index 77e4ff3..81b7d53 100644
+--- a/tests/test_dates.py
++++ b/tests/test_dates.py
+@@ -20,6 +20,9 @@ class IsOverdueTest(unittest.TestCase):
+     def test_past_due_is_overdue(self):
+         self.assertTrue(is_overdue({"done": False, "due": "2026-10-01"}, "2026-10-14"))
+ 
++    def test_due_today_is_not_overdue(self):
++        self.assertFalse(is_overdue({"done": False, "due": "2026-10-14"}, "2026-10-14"))
++
+     def test_future_is_not_overdue(self):
+         self.assertFalse(is_overdue({"done": False, "due": "2026-10-20"}, "2026-10-14"))
+ 
+diff --git a/todo/dates.py b/todo/dates.py
+index 0eb6c47..14b621d 100644
+--- a/todo/dates.py
++++ b/todo/dates.py
+@@ -23,4 +23,4 @@ def is_overdue(todo, today_str):
+     """還沒完成、而且已經過了到期日。"""
+     if todo.get("done") or not todo.get("due"):
+         return False
+-    return todo["due"] <= today_str
++    return todo["due"] < today_str

@@ -1,0 +1,121 @@
+diff --git a/tests/test_server.py b/tests/test_server.py
+index 2d2a4e6..d7fd209 100644
+--- a/tests/test_server.py
++++ b/tests/test_server.py
+@@ -68,6 +68,49 @@ class ApiTest(ServerTestCase):
+         self.assertTrue(body["todo"]["done"])
+ 
+ 
++class PatchTest(ServerTestCase):
++    def test_patch_title(self):
++        self.json("POST", "/api/todos", {"title": "買牛奶"})
++        status, body = self.json("PATCH", "/api/todos/1", {"title": " 買豆漿 "})
++        self.assertEqual(status, 200)
++        self.assertEqual(body["todo"]["title"], "買豆漿")
++
++    def test_patch_due(self):
++        self.json("POST", "/api/todos", {"title": "a"})
++        status, body = self.json("PATCH", "/api/todos/1", {"due": "2026-11-01"})
++        self.assertEqual(status, 200)
++        self.assertEqual(body["todo"]["due"], "2026-11-01")
++
++    def test_patch_title_keeps_due(self):
++        self.json("POST", "/api/todos", {"title": "a", "due": "2026-10-20"})
++        status, body = self.json("PATCH", "/api/todos/1", {"title": "b"})
++        self.assertEqual(body["todo"]["due"], "2026-10-20")
++
++    def test_patch_clear_due(self):
++        self.json("POST", "/api/todos", {"title": "a", "due": "2026-10-20"})
++        status, body = self.json("PATCH", "/api/todos/1", {"due": None})
++        self.assertIsNone(body["todo"]["due"])
++
++    def test_patch_done(self):
++        self.json("POST", "/api/todos", {"title": "a"})
++        self.json("POST", "/api/todos/1/done")
++        status, body = self.json("PATCH", "/api/todos/1", {"done": False})
++        self.assertEqual(status, 200)
++        self.assertFalse(body["todo"]["done"])
++
++    def test_patch_invalid(self):
++        self.json("POST", "/api/todos", {"title": "a"})
++        for payload in ({"title": "  "}, {"due": "11/01"}, {"done": "no"}, {"id": 5}):
++            status, body = self.json("PATCH", "/api/todos/1", payload)
++            self.assertEqual(status, 400, payload)
++            self.assertIn("message", body)
++
++    def test_patch_unknown(self):
++        status, body = self.json("PATCH", "/api/todos/9", {"title": "x"})
++        self.assertEqual(status, 404)
++        self.assertEqual(body["error"]["code"], "not_found")
++
++
+ class PageTest(ServerTestCase):
+     def test_index_lists_titles(self):
+         self.json("POST", "/api/todos", {"title": "<買牛奶>"})
+diff --git a/todo/server.py b/todo/server.py
+index 58ad824..797c60c 100644
+--- a/todo/server.py
++++ b/todo/server.py
+@@ -158,6 +158,31 @@ class Handler(BaseHTTPRequestHandler):
+         else:
+             self._send_json(404, error_body("not_found", "找不到這個路徑"))
+ 
++    def do_PATCH(self):
++        parts = urlsplit(self.path).path.strip("/").split("/")
++        if not (len(parts) == 3 and parts[:2] == ["api", "todos"]):
++            self._send_json(404, error_body("not_found", "找不到這個路徑"))
++            return
++        try:
++            payload = json.loads(self._read_body() or b"{}")
++        except ValueError:
++            payload = None
++        if not isinstance(payload, dict):
++            self._send_json(400, {"message": "request body 要是 JSON 物件"})
++            return
++        if set(payload) - {"title", "due", "done"}:
++            self._send_json(400, {"message": "只能修改 title、due、done"})
++            return
++        try:
++            todo = self.store.update(self._todo_id(parts[2]), payload)
++        except NotFound:
++            self._send_json(404, error_body("not_found", f"找不到 #{parts[2]}"))
++            return
++        except ValueError as e:
++            self._send_json(400, {"message": str(e)})
++            return
++        self._send_json(200, {"todo": to_json(todo, today())})
++
+     def do_DELETE(self):
+         parts = urlsplit(self.path).path.strip("/").split("/")
+         if len(parts) == 3 and parts[:2] == ["api", "todos"]:
+diff --git a/todo/store.py b/todo/store.py
+index 6ece5cd..49d143b 100644
+--- a/todo/store.py
++++ b/todo/store.py
+@@ -66,6 +66,26 @@ class TodoStore:
+                 return todo
+         raise NotFound(todo_id)
+ 
++    def update(self, todo_id, changes):
++        """只改 changes 裡有的欄位（title、due、done），沒帶的保持原樣。"""
++        data = self._load()
++        for todo in data["todos"]:
++            if todo["id"] == todo_id:
++                if "title" in changes:
++                    title = (changes["title"] or "").strip()
++                    if not title:
++                        raise ValueError("title 不可以是空的")
++                    todo["title"] = title
++                if "due" in changes:
++                    todo["due"] = parse_due(changes["due"])
++                if "done" in changes:
++                    if not isinstance(changes["done"], bool):
++                        raise ValueError("done 要是 true 或 false")
++                    todo["done"] = changes["done"]
++                self._save(data)
++                return todo
++        raise NotFound(todo_id)
++
+     def delete(self, todo_id):
+         data = self._load()
+         kept = [t for t in data["todos"] if t["id"] != todo_id]

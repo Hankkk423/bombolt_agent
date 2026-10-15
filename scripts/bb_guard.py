@@ -5,7 +5,7 @@
   A. 任何地方（只要這個資料夾的 git config 設了 github.user）：
      直接呼叫 `gh` 會被擋下，要改用 `bb-gh`——否則 gh 會靜默地用 active 帳號，
      在公司／個人雙帳號的機器上就是用錯帳號開 issue、發 PR。沒設 github.user 就完全不介入。
-  B. 只在「bombolt 建的 worktree」裡（worktree 的 git dir 有 bombolt.json）：下面 1–7。
+  B. 只在「bombolt 建的 worktree」裡（worktree 的 git dir 有 bombolt.json）：下面 1–8。
      使用者自己平常的 session 不受 B 影響。
 
 實作 session 被設計成「完全自主」，所以真正危險的動作不能只靠 prompt 自律，
@@ -22,6 +22,8 @@
   5. rm -r 到 worktree 與暫存目錄以外的地方
   6. 讀寫秘密檔（.env* 以外的）：私鑰、雲端憑證、專案自訂的秘密檔
   7. 直接開 tunnel（ngrok、cloudflared）：外網只能經過 bb_sandbox.py，一定帶帳密
+  8. ScheduleWakeup（排定之後再跑一次）：背景的 subagent 與指令完成時本來就會通知，
+     排定的喚醒只會在沒人看著的時候重跑整個流程
 """
 
 from __future__ import annotations
@@ -309,6 +311,10 @@ def evaluate(payload: Dict[str, Any]) -> Optional[str]:
 
     tool = payload.get("tool_name", "")
     tin = payload.get("tool_input", {}) or {}
+
+    if tool == "ScheduleWakeup" and not tin.get("stop"):
+        return ("在 bombolt worktree 裡不用 ScheduleWakeup 等待：背景的 subagent 與指令完成時會自動通知你。"
+                "直接結束這一輪就好，通知來了再接著做。")
 
     if tool in ("Read", "Edit", "Write", "NotebookEdit"):
         fp = tin.get("file_path") or tin.get("notebook_path") or ""

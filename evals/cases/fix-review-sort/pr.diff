@@ -1,0 +1,42 @@
+diff --git a/tests/test_server.py b/tests/test_server.py
+index e14cead..e1c97a0 100644
+--- a/tests/test_server.py
++++ b/tests/test_server.py
+@@ -68,6 +68,20 @@ class ApiTest(ServerTestCase):
+         self.assertTrue(body["todo"]["done"])
+ 
+ 
++class SortTest(ServerTestCase):
++    def test_sort_by_due(self):
++        self.json("POST", "/api/todos", {"title": "a", "due": "2026-10-20"})
++        self.json("POST", "/api/todos", {"title": "b", "due": "2026-10-15"})
++        status, body = self.json("GET", "/api/todos?sort=due")
++        self.assertEqual(status, 200)
++        self.assertEqual([t["title"] for t in body["todos"]], ["b", "a"])
++
++    def test_invalid_sort(self):
++        status, body = self.json("GET", "/api/todos?sort=title")
++        self.assertEqual(status, 400)
++        self.assertEqual(body["error"]["code"], "invalid_query")
++
++
+ class PageTest(ServerTestCase):
+     def test_index_lists_titles(self):
+         self.json("POST", "/api/todos", {"title": "<買牛奶>"})
+diff --git a/todo/server.py b/todo/server.py
+index 58ad824..c5f8ca3 100644
+--- a/todo/server.py
++++ b/todo/server.py
+@@ -115,6 +115,12 @@ class Handler(BaseHTTPRequestHandler):
+     def list_todos(self, query):
+         today_str = today()
+         todos = self.store.list()
++        sort = query.get("sort", [None])[0]
++        if sort not in (None, "due"):
++            self._send_json(400, error_body("invalid_query", "sort 只能是 due"))
++            return
++        if sort == "due":
++            todos = sorted(todos, key=lambda t: t["due"] or "")
+         self._send_json(200, {"todos": [to_json(t, today_str) for t in todos]})
+ 
+     def do_POST(self):

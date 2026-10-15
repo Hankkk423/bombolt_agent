@@ -1,0 +1,18 @@
+{
+  "threads": [
+    {
+      "path": "todo/server.py",
+      "line": 123,
+      "author": "amy-reviewer",
+      "body": "沒有 due 的要排在最後，不是最前面（使用者要的是「最快到期的在最上面」，沒有到期日的最不急）。另外 due 一樣的，照 created_at 舊的在前，不要依賴 store 裡的順序。"
+    }
+  ],
+  "reviews": [
+    {
+      "author": "amy-reviewer",
+      "state": "CHANGES_REQUESTED",
+      "body": "整體 OK，只有排序的規則要改，見 inline comment。改完我再看一次。"
+    }
+  ],
+  "comments": []
+}

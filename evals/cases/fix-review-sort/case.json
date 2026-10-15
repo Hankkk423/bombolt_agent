@@ -1,0 +1,10 @@
+{
+  "kind": "fix",
+  "title": "feat(api): GET /api/todos 支援 ?sort=due 依到期日排序",
+  "slug": "sort-by-due",
+  "ui": false,
+  "description": "bb-fix 接手（另一台電腦開的 PR、這台沒有 worktree）：讀 PR 上的修改紀錄與未解決的 review thread，把 review 補的規則（沒有 due 排最後、同 due 照 created_at）記成需求調整、修改、重新驗收、回覆 thread（不 resolve）、留下第 2 輪紀錄、狀態改回審查中。",
+  "allowed_paths": ["todo/server.py", "tests/*"],
+  "tags": ["fix", "review", "handoff"],
+  "pr_title": "feat(api): GET /api/todos 支援 ?sort=due 依到期日排序 (#{{issue}})"
+}

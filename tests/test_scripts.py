@@ -367,6 +367,18 @@ class TestGuard(RepoFixture):
             self.assertIsNone(self.bash(c), c)
         self.assertIsNone(self.bash("ngrok http 3012", cwd=str(self.repo)))  # worktree 外不管
 
+    def test_schedule_wakeup(self):
+        """等 subagent 不用排定喚醒（完成會自動通知）；停掉 loop、worktree 外都放行。"""
+        def wake(tin, cwd=None):
+            return bb_guard.evaluate({"cwd": cwd or self.wt, "tool_name": "ScheduleWakeup", "tool_input": tin})
+        self.assertIsNotNone(wake({"delaySeconds": 1800, "prompt": "/bombolt:bb-work 12", "reason": "wait"}))
+        self.assertIsNone(wake({"stop": True}))
+        self.assertIsNone(wake({"delaySeconds": 1800, "prompt": "x"}, cwd=str(self.repo)))
+        self.assertIsNone(wake({"delaySeconds": 1800, "prompt": "x"}, cwd=str(self.tmp)))
+        # hook 的 matcher 要包含它，規則才會生效
+        matchers = [h["matcher"] for h in json.loads((ROOT / "hooks" / "hooks.json").read_text())["hooks"]["PreToolUse"]]
+        self.assertTrue(any("ScheduleWakeup" in m.split("|") for m in matchers))
+
     def test_rm(self):
         self.assertIsNone(self.bash("rm -rf node_modules dist"))
         self.assertIsNone(self.bash("rm -rf /tmp/bombolt-shots"))
@@ -440,7 +452,8 @@ FAKE_GH = textwrap.dedent("""\
         pr = data["_pr:" + args[2]]
         n = data.get("_next_comment_id", 1000)
         url = f"https://github.com/o/r/pull/{args[2]}#issuecomment-{n}"
-        pr.setdefault("comments", []).append({"url": url, "body": open(args[args.index("--body-file") + 1]).read()})
+        pr.setdefault("comments", []).append({"url": url, "body": open(args[args.index("--body-file") + 1]).read(),
+                                              "createdAt": data.get("_now", "")})
         data["_next_comment_id"] = n + 1
         save()
         print(url)
@@ -494,6 +507,15 @@ FAKE_GH = textwrap.dedent("""\
         sys.exit(1)
     if args[:2] == ["api", "user"]:
         print(data.get("_login", "tester"))
+        sys.exit(0)
+    if args[:2] == ["api", "graphql"]:  # bb_pr.py context 讀 review：回傳 _gql:<n>
+        if data.get("_gql_fail"):
+            print("GraphQL: 失敗", file=sys.stderr)
+            sys.exit(1)
+        fields = dict(a.split("=", 1) for a in args[2:] if "=" in a and not a.startswith("query="))
+        data["_gql_fields"] = fields
+        save()
+        print(json.dumps({"data": {"repository": {"pullRequest": data.get("_gql:" + fields.get("n", ""), {})}}}))
         sys.exit(0)
     if args[:2] == ["issue", "edit"]:
         data.setdefault("_edits", []).append(args[2:])
@@ -1364,6 +1386,18 @@ class TestResync(RepoFixture):
         self.assertEqual(sh(["git", "rev-parse", f"origin/{self.info['branch']}"], self.repo).stdout, before_branch)
         self.assertEqual(sh(["git", "rev-parse", "origin/dev"], self.repo).stdout, before_dev)
 
+    def test_check_accepts_relative_path_inside_worktree(self):
+        # skill 寫 `--path .`，不用 `$(git rev-parse --show-toplevel)`（worktree 隔離會擋）
+        (self.wt / "sub").mkdir()
+        want = self.resync("check", "--path", str(self.wt))
+        for cwd, arg in ((self.wt, "."), (self.wt / "sub", "."), (self.wt / "sub", "..")):
+            r = json.loads(self.run_script("bb_resync.py", "check", "--path", arg, cwd=cwd).stdout.strip().splitlines()[-1])
+            self.assertEqual(r["status"], "ok", (cwd, arg, r))
+            self.assertEqual(r, want)
+        # 不在 bombolt worktree 裡：照樣報錯
+        r = json.loads(self.run_script("bb_resync.py", "check", "--path", ".", cwd=self.repo, check=False).stdout.strip().splitlines()[-1])
+        self.assertEqual(r["status"], "error")
+
     def test_check_reports_behind_and_integration(self):
         r = self.resync("check", "--path", str(self.wt))
         self.assertTrue(r["applicable"])
@@ -1918,7 +1952,59 @@ class TestPrHandoff(HandoffFixture):
         self.run_script("bb_issues.py", "mark", "--issue", "12", "--event", "fixing", "--pr", "7", "--session-id", "mine")
         ctx = self.bbpr("context", "--pr", "7", "--session-id", "mine")
         self.assertEqual((ctx["lock"]["mine"], ctx["lock"]["this_session"]), (True, True))
-        self.assertEqual(ctx["messages"], ["這個 PR 還沒有 bombolt 修改紀錄（這個功能之前開的）：以 PR 內文和 diff 為準，這一輪要重新驗收。"])
+        self.assertEqual(ctx["messages"], ["這個 PR 還沒有 bombolt 修改紀錄（這個功能之前開的）：以 PR 內文和 diff 為準，這一輪要重新驗收。",
+                                           "PR 上沒有新的 review 意見（沒解決的 thread、上一則紀錄之後的 review 總評與留言都沒有）。"])
+
+    def test_context_collects_review_feedback(self):
+        # 接手的 agent 動 code（包括解衝突）之前，一定要先看到 reviewer 說了什麼：context 直接帶回來
+        d = self.data()
+        d["_now"] = "2026-10-01T10:00:00Z"
+        self.gh_data.write_text(json.dumps(d, ensure_ascii=False))
+        self.record("sess-1")
+        human = lambda at, body: {"url": f"https://github.com/o/r/pull/7#issuecomment-{at[11:13]}", "body": body,
+                                  "createdAt": at, "author": {"login": "amy"}}
+        thread = lambda tid, resolved, *bodies: {
+            "id": tid, "isResolved": resolved, "isOutdated": False, "path": "todo/cli.py", "line": 3,
+            "comments": {"totalCount": len(bodies), "nodes": [
+                {"databaseId": 500 + i, "author": {"login": "amy"}, "body": b, "createdAt": "2026-10-01T11:00:00Z",
+                 "url": f"https://github.com/o/r/pull/7#discussion_r{500 + i}"} for i, b in enumerate(bodies)]}}
+        self.update("_pr:7", comments=[human("2026-10-01T08:00:00Z", "上一輪之前的留言")] + self.comments()
+                    + [human("2026-10-01T12:00:00Z", "另外，標題也改一下")])
+        d = self.data()
+        d["_gql:7"] = {
+            "mergeable": "CONFLICTING", "mergeStateStatus": "DIRTY",
+            "reviews": {"totalCount": 3, "nodes": [
+                {"author": {"login": "amy"}, "state": "CHANGES_REQUESTED", "body": "上一輪的", "submittedAt": "2026-10-01T09:00:00Z"},
+                {"author": {"login": "amy"}, "state": "CHANGES_REQUESTED", "body": "--pending 時摘要照全部的項目算",
+                 "submittedAt": "2026-10-01T11:00:00Z", "url": "https://github.com/o/r/pull/7#pullrequestreview-9"},
+                {"author": {"login": "bob"}, "state": "APPROVED", "body": "", "submittedAt": "2026-10-01T11:30:00Z"}]},
+            "reviewThreads": {"totalCount": 3, "nodes": [
+                thread("T1", True, "已經解決的"),
+                thread("T2", False, "這裡改成 <", "已修正於 `abc1234`：改成 <"),
+                thread("T3", False, "全部完成時印「全部完成 🎉」")]}}
+        self.gh_data.write_text(json.dumps(d, ensure_ascii=False))
+
+        ctx = self.bbpr("context", "--pr", "7")
+        fb = ctx["feedback"]
+        self.assertEqual(self.data()["_gql_fields"], {"owner": "{owner}", "repo": "{repo}", "n": "7"})
+        self.assertEqual([(t["id"], t["answered"], t["reply_to"]) for t in fb["threads"]], [("T2", True, 500), ("T3", False, 500)])
+        self.assertEqual(fb["resolved_threads"], 1)
+        self.assertEqual([(r["body"], r["new"]) for r in fb["reviews"]],
+                         [("上一輪的", False), ("--pending 時摘要照全部的項目算", True)])  # 沒有內文的 approve 不算
+        self.assertEqual([c["body"] for c in fb["comments"]], ["另外，標題也改一下"])  # 紀錄本身、紀錄之前的留言不算
+        self.assertEqual((fb["mergeable"], fb["error"], fb["truncated"]), ("CONFLICTING", "", False))
+        msgs = " ".join(ctx["messages"])
+        self.assertIn("沒解決的 review thread 2 個（其中 1 個上一輪已經回覆、在等 reviewer）、上一則紀錄之後的 review 總評 1 則、新留言 1 則", msgs)
+        self.assertIn("有衝突", msgs)
+
+        # 讀不到 review：context 照樣成功，但明確叫 agent 手動讀，不能當成「沒有意見」
+        d = self.data()
+        d["_gql_fail"] = True
+        self.gh_data.write_text(json.dumps(d, ensure_ascii=False))
+        ctx = self.bbpr("context", "--pr", "7")
+        self.assertIn("GraphQL: 失敗", ctx["feedback"]["error"])
+        self.assertIn("讀不到 review", " ".join(ctx["messages"]))
+        self.assertNotIn("沒有新的 review 意見", " ".join(ctx["messages"]))
 
     def test_legacy_body_section_is_replaced(self):
         old = PR_BODY.replace("<!-- bombolt:handoff -->",

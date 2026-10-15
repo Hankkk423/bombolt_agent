@@ -15,6 +15,9 @@ bombolt 是給**所有專案**用的 Claude Code plugin，使用說明見 `READM
   - 正常工作用到的指令沒被誤擋
 - **測試防呆、刪除、關閉類的功能，只對自己建的測試對象做**（暫存 repo、拋棄式 session、假程序），
   不要對使用者正在用的 session、branch、檔案執行「看它會不會擋」——判斷寫錯的話，損失是真的。
+- **改完 skill、agent、hook 或腳本的行為，用 `/bb-eval` 量一次**（`evals/`：實際跑 bb-work／bb-fix 打分、跟 baseline 比）。
+  它會花錢（全部約 US$25–40），使用者沒叫你跑就先問。
+  eval 是量尺：不要為了分數去改題目、grader 或 baseline。改了 `evals/` 要跑 `python3 evals/run.py selftest`。
 - 改完 manifest、skill 或 agent 之後跑 `claude plugin validate .`。
   唯一可以接受的 warning 是「沒有 version」：刻意不釘版號，讓同事跟著 commit 自動更新。
 - 所有給使用者看的文字用繁體中文，程式碼識別字用英文。

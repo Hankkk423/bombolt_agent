@@ -8,7 +8,7 @@
 
 用法（在哪個目錄執行都可以，不用先進某個 worktree）：
   bb_resync.py list                      → 列出候選（本機有 worktree、有開向 pr_base 的 PR），附上每個需不需要同步
-  bb_resync.py check  --path <worktree> [--draft]
+  bb_resync.py check  --path <worktree> [--draft]   （<worktree> 可以是 `.`：在 worktree 裡執行時）
                                          → 唯讀：落後 origin/<base_branch> 幾個 commit、是否還在每個 integration_branches 裡，
                                             以及 needs_sync（要不要同步）與理由。draft PR 本來就不整合，加 --draft 只看落後
   bb_resync.py start  --path <worktree> [--no-integrate]
@@ -97,7 +97,8 @@ def cmd_list(_args: argparse.Namespace) -> None:
 
 
 def _load_ctx(path_str: str):
-    path = Path(path_str)
+    # `--path .` 或 worktree 裡的子目錄也可以：skill 不用寫 `$(git rev-parse …)`（worktree 隔離會擋）
+    path = Path(bb_lib.git(["rev-parse", "--show-toplevel"], path_str, check=False) or path_str)
     meta = bb_lib.read_meta(path)
     if not meta or meta.get("tool") != "bombolt" or meta.get("integration"):
         out(status="error", message=f"{path_str} 不是 bombolt 的 feature worktree。")

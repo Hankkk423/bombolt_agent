@@ -1,0 +1,9 @@
+{
+  "kind": "work",
+  "title": "feat(web): 首頁顯示「還有 N 項未完成」",
+  "slug": "remaining-counter",
+  "ui": true,
+  "description": "UI 類的 bb-work：改動前先拍 before、改完拍 after（同畫面同資料）、用 --attach 附進 PR；verifier 要用 playwright-cli 實際操作網頁（含按「完成」後數字變化）。",
+  "allowed_paths": ["todo/server.py", "tests/*"],
+  "tags": ["ui", "screenshot"]
+}

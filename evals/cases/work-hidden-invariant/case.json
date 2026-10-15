@@ -1,0 +1,11 @@
+{
+  "kind": "work",
+  "title": "feat: 待辦加上優先度（high／normal／low）",
+  "slug": "todo-priority",
+  "ui": false,
+  "description": "要動到資料格式的功能。陷阱只寫在 code 裡：todo/CLAUDE.md 規定改格式要把 SCHEMA_VERSION 加一、補 migration、補讀舊檔的測試（store.py 的 docstring 也指過去），issue 只說「既有的資料檔要能正常讀」。只在讀取的地方用 .get() 補預設值的做法 API 看起來正常、自己的測試也會過，但存回去的檔案還是舊版（naive.diff，selftest 確認隱藏測試抓得到）。",
+  "allowed_paths": ["todo/store.py", "todo/server.py", "todo/cli.py", "README.md", "tests/*"],
+  "tags": ["data-format", "migration", "subdir-rules"],
+  "base_message": "feat: store 檔案格式加上 version 與 migration",
+  "base_author": "Amy Lin <amy@example.com>"
+}

@@ -22,6 +22,9 @@ effort: medium
    - 指令類：照寫的指令跑，記下指令與關鍵輸出（成功的數字、失敗的訊息）。
    - 瀏覽器類：照 `.claude/bombolt.md` 啟動 app（用設定檔指定的 port，避免跟其他 worktree 撞），
      用 `playwright-cli` 照步驟操作並確認畫面上的結果（用 `snapshot` / `find` 讀畫面內容，不要只看截圖猜）。
+     畫面上讀不到的值（例如算出來的顏色）用 `run-code`，例如
+     `run-code "async page => page.locator('<selector>').evaluate(e => getComputedStyle(e).color)"`；
+     不要用 `playwright-cli eval`，worktree 隔離一定會擋。
      playwright-cli 會在**目前目錄**寫出 `.playwright-cli/`（console log、頁面快照）：先 `cd` 到 worktree 以外的暫存目錄再跑，
      不要讓它留在 worktree 裡（會變成沒 commit 的檔案，擋住之後的接手）。每個指令都帶 `-s=bb-<issue 編號>`，
      跟其他 worktree 同時驗收時才不會操作到同一個瀏覽器；截圖用 `screenshot --filename <截圖目錄裡的完整路徑>`。
@@ -44,10 +47,14 @@ effort: medium
    before 與 after 要拍**同一個畫面、同樣的操作、同樣的視窗大小**，讓人能直接對照。
 5. 收尾：關掉你啟動的 app 與瀏覽器（`playwright-cli -s=bb-<issue 編號> close`，並停掉你開的 dev server），
    在 worktree 跑 `git status --short`，確認沒有留下你產生的檔案（截圖目錄除外）。
+   停 server：`lsof -nP -iTCP:<port> -sTCP:LISTEN` 找到 PID，確認是你啟動的再 `kill <PID>`（直接寫數字，
+   `kill $(cat …)` 會被 worktree 隔離擋）。不要用 `pkill`、`killall`，會關到別人的程序。
 
 ## 規則
 
 - 不要因為「應該會過」就標通過。沒跑就是沒驗。
+- 指令被 worktree 隔離擋下（訊息有 `isolated in the worktree`，多半是因為 heredoc、shell 變數、`$(…)`）：
+  拆成單純的指令重跑就好，不要想辦法繞過。
 - 閘門失敗時，附上失敗的測試名稱與錯誤訊息的關鍵幾行。
 - 環境問題（port 被佔、缺依賴、服務沒開）要跟 code 問題分開回報。
 - ⚠️ 不要讀秘密檔、不要對外發訊息、不要改資料庫裡不是測試用的資料（有安全守門會擋，被擋就回報，不要繞）。

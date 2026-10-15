@@ -1,0 +1,9 @@
+{
+  "kind": "work",
+  "title": "fix(dates): 今天到期的待辦被標成逾期",
+  "slug": "due-today-not-overdue",
+  "ui": false,
+  "description": "bb-plan 排查後開的 fix issue：先寫會失敗的重現測試再修、最小改動（一個字元），驗收要用 TODO_TODAY 固定日期實際啟動 app 確認 API 與網頁都正確。",
+  "allowed_paths": ["todo/dates.py", "tests/*"],
+  "tags": ["bugfix"]
+}

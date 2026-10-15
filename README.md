@@ -279,7 +279,8 @@ repo 主目錄有 Claude session 開著、或 24 小時內才建立的會保留�
 `.claude/bombolt.md` 設定 `pr_base`（不設就跟 `base_branch` 一樣）即可啟用這個模式。
 發版後一樣在主 checkout 執行 `/bombolt:bb-fix`；這個模式下它還會把最新的 `base_branch` 合進每個沒上版的 PR。
 - **先合了一個 PR，另一個 PR 就出現 conflict**：`/bombolt:bb-fix <那個 PR>`，
-  它會把最新的 `pr_base` 合進來、解衝突、跑閘門、push，並在 PR 留言列出「這個 PR 現在也包含了哪些 PR」
+  它會先讀完 PR 上的 review（衝突該怎麼解，常常就寫在裡面），再把最新的 `pr_base` 合進來、解衝突、跑閘門、push，
+  並在 PR 留言列出「這個 PR 現在也包含了哪些 PR」
   （之後若決定某個 PR 這波不上，就知道哪些 PR 已經帶著它）。
 
 ⚠️ **issue 怎麼關**：bombolt 發 PR 時內文固定寫 `Closes #N`，GitHub 在 PR merge 時會自己關掉對應的 issue——
@@ -365,6 +366,7 @@ bombolt 所有的 GitHub 操作（開 issue、發 PR、留言、附圖）都經�
 | `rm -r` 到 worktree 與暫存目錄以外的地方 | `rm -rf ~`、刪主 checkout 的檔 |
 | 秘密檔（`.env*` 以外） | 私鑰、`~/.aws/credentials`，以及專案設定的 `secret_paths` |
 | 直接開 tunnel（外網只能經過 `bb-sandbox`，一定帶帳密） | `ngrok http 3000`、`cloudflared tunnel --url …` |
+| 排定之後再跑一次（subagent 完成本來就會通知，排定的喚醒只會在沒人看著時重跑整個流程） | `ScheduleWakeup` |
 
 每個專案可以在 `.claude/bombolt.md` 追加 `protected_branches`、`deny_commands`、`secret_paths`。
 
@@ -382,6 +384,8 @@ bombolt 所有的 GitHub 操作（開 issue、發 PR、留言、附圖）都經�
 - 改動的方式：對這個 repo 發 PR。merge 之後，開了自動更新的人會在背景拿到新版
   （plugin 沒有釘版號，版本就是 commit SHA）；沒開的人照 [更新與移除](#更新與移除) 手動更新。
 - **開發 bombolt 本身時**，直接載入本機這份，改了立刻生效：`claude --plugin-dir ~/path/to/bombolt`
+- **改完之後量一次**：在這個 repo 說「跑 eval」或 `/bb-eval`。它會用固定的題目實際跑 bb-work／bb-fix（假的 GitHub、拋棄式 repo），
+  打分並跟 baseline 比，找出退步與原因。會花錢（全部約 US$25–40），細節見 [`evals/README.md`](evals/README.md)。
 - 結構：
 
   ```
@@ -392,6 +396,7 @@ bombolt 所有的 GitHub 操作（開 issue、發 PR、留言、附圖）都經�
   bin/bb-gh                依資料夾選 GitHub 帳號的 gh wrapper
   scripts/                 固定步驟的腳本（worktree、快照、守門、清理、外網 tunnel、PR 修改紀錄），只用 python 標準函式庫
   tests/                   腳本的測試：python3 -m unittest discover -s tests
+  evals/                   pipeline 的 eval：玩具專案、題目、假 gh、runner（開發 bombolt 用，/bb-eval）
   example_repo_structure/  使用者的 repo 接上 bombolt 之後會有的檔案（範例）
   ```
 
