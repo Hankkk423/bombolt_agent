@@ -122,6 +122,20 @@ class TestConfig(RepoFixture):
         (self.repo / ".claude" / "bombolt.md").unlink()
         self.assertIsNone(bb_lib.load_config(self.repo))
 
+    def test_related_repos_is_always_a_list(self):
+        self.assertEqual(bb_lib.load_config(self.repo)["related_repos"], [])  # 沒寫
+        for line, want in (("related_repos: acme/web", ["acme/web"]),
+                           ("related_repos: [acme/web, acme/docs]", ["acme/web", "acme/docs"]),
+                           ("related_repos:\n  - acme/web", ["acme/web"])):
+            (self.repo / ".claude" / "bombolt.md").write_text(f"---\nbase_branch: main\n{line}\n---\n")
+            self.assertEqual(bb_lib.load_config(self.repo)["related_repos"], want, line)
+
+    def test_repo_slug(self):
+        for url in ("https://github.com/Acme/API.git", "https://github.com/acme/api", "https://github.com/acme/api/",
+                    "git@github.com:acme/api.git", "git@github-work:acme/api.git", "ssh://git@github.com/acme/api.git\n"):
+            self.assertEqual(bb_lib.repo_slug(url), "acme/api", url)
+        self.assertEqual(bb_lib.repo_slug("weird"), "")
+
 
 class TestWorktree(RepoFixture):
     def test_create_from_latest_origin_base(self):
@@ -263,6 +277,39 @@ class TestSnapshot(RepoFixture):
         p = self.run_script("bb_snapshot.py", "remove", str(self.repo), check=False)
         self.assertNotEqual(p.returncode, 0)
         self.assertTrue(self.repo.exists())
+
+    def locate(self, name, projects):
+        home = self.tmp / "home"
+        home.mkdir(exist_ok=True)
+        if projects is not None:
+            (home / ".claude.json").write_text(json.dumps({"projects": {str(p): {} for p in projects}}))
+        self.env["HOME"] = str(home)
+        p = self.run_script("bb_snapshot.py", "locate", "--repo", name, cwd=self.tmp)
+        self.assertEqual(p.returncode, 0)
+        return json.loads(p.stdout)
+
+    def plain_repo(self, name, url):
+        path = self.tmp / name
+        sh(["git", "init", "-q", str(path)], self.tmp)
+        sh(["git", "remote", "add", "origin", url], path)
+        return path
+
+    def test_locate(self):
+        api = self.plain_repo("api", "https://github.com/Acme/API.git")
+        web = self.plain_repo("web", "git@github-work:acme/web.git")  # ssh host alias（多帳號）
+        docs = self.plain_repo("docs", "ssh://git@github.com/acme/docs.git")
+        dup1 = self.plain_repo("dup1", "git@github.com:acme/dup.git")
+        dup2 = self.plain_repo("dup2", "https://github.com/acme/dup")
+        (api / "sub").mkdir()
+        projects = [api, api / "sub", web, docs, dup1, dup2, self.tmp / "gone", self.tmp]
+        self.assertEqual(self.locate("acme/api", projects), {"status": "found", "path": str(api)})  # 子目錄去重
+        self.assertEqual(self.locate("acme/web", projects)["path"], str(web))
+        self.assertEqual(self.locate("ACME/docs", projects)["path"], str(docs))
+        self.assertEqual(self.locate("acme/dup", projects), {"status": "multiple", "paths": sorted([str(dup1), str(dup2)])})
+        self.assertEqual(self.locate("acme/none", projects)["status"], "not_found")
+
+    def test_locate_without_claude_json(self):
+        self.assertEqual(self.locate("acme/api", None)["status"], "not_found")
 
 
 class TestGuard(RepoFixture):
@@ -436,11 +483,31 @@ FAKE_GH = textwrap.dedent("""\
     import json, os, sys
     data = json.load(open(os.environ["FAKE_GH_DATA"]))
     args = sys.argv[1:]
+    if os.environ.get("FAKE_GH_CALL_LOG"):
+        with open(os.environ["FAKE_GH_CALL_LOG"], "a") as f:
+            f.write(json.dumps(args) + "\\n")
     if data.get("_fail"):
         print("fake gh: 失敗", file=sys.stderr)
         sys.exit(1)
     def save():
         json.dump(data, open(os.environ["FAKE_GH_DATA"], "w"), ensure_ascii=False)
+    if "-R" in args:  # 另一個 repo（跨 repo 配對）：唯讀，資料放在 _repo:<owner/name> 底下
+        k = args.index("-R")
+        other = args[k + 1]
+        args = args[:k] + args[k + 2:]
+        if other in data.get("_fail_repo", []):
+            print("fake gh: Could not resolve to a Repository", file=sys.stderr)
+            sys.exit(1)
+        data = data.get("_repo:" + other, {})
+        def save():
+            raise SystemExit("fake gh: -R 是唯讀的")
+    if args[:1] == ["api"] and "/compare/" in args[1]:  # 回 _compare 裡記的 status（--jq .status）
+        status = data.get("_compare", {}).get(args[1])
+        if status is None:
+            print("fake gh: Not Found (HTTP 404)", file=sys.stderr)
+            sys.exit(1)
+        print(status)
+        sys.exit(0)
     if args[:2] == ["pr", "view"]:
         pr = data.get("_pr:" + args[2])
         if pr is None:
@@ -1741,6 +1808,167 @@ class TestIssueStatus(RepoFixture):
         p = self.run_script("bb_issues.py", "list")
         self.assertEqual(p.returncode, 0)
         self.assertEqual(json.loads(p.stdout)["status"], "error")
+
+
+UPSTREAM_URL = "https://github.com/acme/api/issues/12"
+PAIR_KEYS = {"url", "repo", "number", "relation", "title", "base", "verdict", "message", "owner_text", "mine",
+             "fixing", "open_prs", "closed_prs", "merged_prs", "merged_pr", "satisfied", "in_base"}
+
+
+def paired_issue(n, slug, url=UPSTREAM_URL, relation="depends_on", base="prod", state="OPEN"):
+    meta = {"base": base, "slug": slug}
+    if url is not None:
+        meta["pair"] = {"url": url, "relation": relation}
+    if base is None:
+        del meta["base"]
+    return {"number": n, "title": f"issue {n}", "url": f"https://x/{n}", "state": state,
+            "body": f"內文\n\n<!-- bombolt:meta {json.dumps(meta)} -->", "comments": [],
+            "assignees": [], "labels": [{"name": "bombolt"}]}
+
+
+class TestIssuePair(RepoFixture):
+    """bb_issues.py：跨 repo 的成對 issue。對方 repo 的資料放在假 gh 的 _repo:acme/api 底下（用 -R 查）。"""
+
+    def setUp(self):
+        super().setUp()
+        bindir = self.tmp / "bin"
+        bindir.mkdir()
+        (bindir / "gh").write_text(FAKE_GH)
+        (bindir / "gh").chmod(0o755)
+        self.gh_data = self.tmp / "gh.json"
+        self.calls = self.tmp / "calls.log"
+        self.env = {**os.environ, "PATH": f"{bindir}:{os.environ['PATH']}", "FAKE_GH_DATA": str(self.gh_data),
+                    "FAKE_GH_CALL_LOG": str(self.calls)}
+
+    def setup_gh(self, mine, upstream=None, upstream_prs=(), compare=None, **extra):
+        """mine：這個 repo 的 issue 清單；upstream：acme/api#12 的 issue（None 表示不存在）。"""
+        other = {}
+        if upstream is not None:
+            other["_issue:12"] = upstream
+            other["bb-12-export"] = list(upstream_prs)
+        data = {"_issues": mine, "_repo:acme/api": other, "_compare": compare or {}, **extra}
+        for i in mine:
+            data["_issue:" + str(i["number"])] = i
+        self.gh_data.write_text(json.dumps(data, ensure_ascii=False))
+
+    def gh_calls(self):
+        return [json.loads(l) for l in self.calls.read_text().splitlines()] if self.calls.exists() else []
+
+    def merged(self, n=30, sha="m" * 40):
+        return {"number": n, "state": "MERGED", "url": f"https://github.com/acme/api/pull/{n}",
+                "headRefOid": "h" * 40, "author": {"login": "amy-gh"}, "mergeCommit": {"oid": sha}}
+
+    def listed(self):
+        p = self.run_script("bb_issues.py", "list")
+        self.assertEqual(p.returncode, 0)
+        out = json.loads(p.stdout)
+        self.assertEqual(out["status"], "ok")
+        return {i["number"]: i for i in out["issues"]}
+
+    def compare_key(self, base="prod", sha="m" * 40):
+        return f"repos/acme/api/compare/{sha}...{base}"
+
+    def test_no_pair_adds_nothing(self):
+        self.setup_gh([bb_issue(41, "plain")])
+        issue = self.listed()[41]
+        self.assertEqual((issue["pair"], issue["waiting"]), (None, False))
+        st = json.loads(self.run_script("bb_issues.py", "status", "--issue", "41").stdout)
+        self.assertEqual((st["pair"], st["waiting"]), (None, False))
+        # 沒有配對的 issue 不多打任何 gh 呼叫
+        self.assertFalse([c for c in self.gh_calls() if "-R" in c or (c[:1] == ["api"] and c[1:2] != ["user"])])
+
+    def test_depends_on_waits_until_upstream_is_in_base(self):
+        upstream = bb_issue(12, "export")
+        # 1. 上游還沒有 PR
+        self.setup_gh([paired_issue(41, "button")], upstream=upstream)
+        pair = self.listed()[41]["pair"]
+        self.assertEqual(set(pair), PAIR_KEYS)
+        self.assertEqual((pair["repo"], pair["number"], pair["base"], pair["verdict"]), ("acme/api", 12, "prod", "free"))
+        self.assertEqual((pair["satisfied"], pair["in_base"], pair["merged_pr"]), (False, None, None))
+        self.assertTrue(self.listed()[41]["waiting"])
+        # 2. 上游的 PR 還開著
+        opened = dict(self.merged(), state="OPEN", mergeCommit=None)
+        self.setup_gh([paired_issue(41, "button")], upstream=upstream, upstream_prs=[opened])
+        pair = self.listed()[41]["pair"]
+        self.assertEqual((pair["verdict"], pair["open_prs"][0]["number"], pair["satisfied"]), ("in_review", 30, False))
+        # 3. merge 了，但還沒進 base（例如 merge 進 release）
+        for status in ("behind", "diverged"):
+            self.setup_gh([paired_issue(41, "button")], upstream=upstream, upstream_prs=[self.merged()],
+                          compare={self.compare_key(): status})
+            issue = self.listed()[41]
+            self.assertEqual((issue["pair"]["merged_pr"], issue["pair"]["in_base"], issue["pair"]["satisfied"]),
+                             (30, False, False), status)
+            self.assertIn("還沒進 `prod`", issue["pair"]["message"])
+            self.assertTrue(issue["waiting"])
+        # 4. 進了 base
+        for status in ("ahead", "identical"):
+            self.setup_gh([paired_issue(41, "button")], upstream=upstream, upstream_prs=[self.merged()],
+                          compare={self.compare_key(): status})
+            issue = self.listed()[41]
+            self.assertEqual((issue["pair"]["in_base"], issue["pair"]["satisfied"], issue["waiting"]),
+                             (True, True, False), status)
+
+    def test_upstream_closed_by_sweep_still_counts(self):
+        self.setup_gh([paired_issue(41, "button")], upstream=bb_issue(12, "export", state="CLOSED"),
+                      upstream_prs=[self.merged(n=29, sha="a" * 40), self.merged()],
+                      compare={self.compare_key(): "ahead"})
+        pair = self.listed()[41]["pair"]
+        self.assertEqual((pair["verdict"], pair["merged_pr"], pair["satisfied"]), ("closed", 30, True))
+
+    def test_blocks_and_parallel_never_check_base(self):
+        for relation in ("blocks", "parallel"):
+            if self.calls.exists():
+                self.calls.unlink()
+            self.setup_gh([paired_issue(41, "button", relation=relation)], upstream=bb_issue(12, "export"),
+                          upstream_prs=[self.merged()])
+            issue = self.listed()[41]
+            self.assertEqual((issue["pair"]["merged_pr"], issue["pair"]["satisfied"], issue["pair"]["in_base"]),
+                             (30, None, None), relation)
+            self.assertFalse(issue["waiting"])
+            self.assertFalse([c for c in self.gh_calls() if c[:1] == ["api"] and "/compare/" in c[1]])
+
+    def test_unreachable_repo_only_affects_that_issue(self):
+        self.setup_gh([paired_issue(41, "button"), bb_issue(42, "plain")], upstream=bb_issue(12, "export"),
+                      _fail_repo=["acme/api"])
+        by_n = self.listed()
+        pair = by_n[41]["pair"]
+        self.assertEqual(set(pair), PAIR_KEYS)
+        self.assertEqual((pair["verdict"], pair["satisfied"], pair["relation"]), ("unknown", None, "depends_on"))
+        self.assertIn("acme/api#12", pair["message"])
+        self.assertTrue(by_n[41]["waiting"])
+        self.assertEqual((by_n[42]["verdict"], by_n[42]["pair"]), ("free", None))
+
+    def test_bad_format(self):
+        self.setup_gh([paired_issue(41, "a", url="{{pair_url}}"), paired_issue(42, "b", relation="before")],
+                      upstream=bb_issue(12, "export"))
+        by_n = self.listed()
+        for n in (41, 42):
+            self.assertEqual(set(by_n[n]["pair"]), PAIR_KEYS)
+            self.assertEqual(by_n[n]["pair"]["verdict"], "unknown")
+            self.assertIn("配對資料格式不對", by_n[n]["pair"]["message"])
+        self.assertEqual((by_n[41]["pair"]["relation"], by_n[41]["pair"]["repo"]), ("depends_on", None))
+        self.assertEqual(by_n[42]["pair"]["relation"], None)
+        self.assertTrue(by_n[42]["waiting"])
+        self.assertFalse([c for c in self.gh_calls() if "-R" in c])  # 格式不對不打 gh
+
+    def test_upstream_without_base(self):
+        upstream = paired_issue(12, "export", url=None, base=None)
+        self.setup_gh([paired_issue(41, "button")], upstream=upstream, upstream_prs=[self.merged()])
+        pair = self.listed()[41]["pair"]
+        self.assertEqual((pair["verdict"], pair["base"], pair["satisfied"], pair["in_base"]), ("merged", None, False, None))
+        self.assertIn("沒有 bombolt:meta 的 base", pair["message"])
+
+    def test_compare_failure_is_unknown(self):
+        self.setup_gh([paired_issue(41, "button")], upstream=bb_issue(12, "export"), upstream_prs=[self.merged()])
+        pair = self.listed()[41]["pair"]
+        self.assertEqual((pair["verdict"], pair["satisfied"], pair["in_base"]), ("unknown", None, None))
+
+    def test_status_reports_pair(self):
+        self.setup_gh([paired_issue(41, "button")], upstream=bb_issue(12, "export"), upstream_prs=[self.merged()],
+                      compare={self.compare_key(): "behind"})
+        p = self.run_script("bb_issues.py", "status", "--issue", "41")
+        st = json.loads(p.stdout)
+        self.assertEqual((st["verdict"], st["pair"]["in_base"], st["waiting"]), ("free", False, True))
 
 
 PR_BODY = textwrap.dedent("""\

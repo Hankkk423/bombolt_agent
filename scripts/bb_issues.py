@@ -15,6 +15,10 @@ PR 的狀態（開著／關掉／merge）一律即時問 GitHub：用 branch 名
 slug 來自 issue 內文的 `<!-- bombolt:meta -->`，不看留言。所以留言沒更新到（例如 PR 是在網頁上被關掉的），
 判斷也不會錯。
 
+跨 repo 的成對 issue：meta 的 `pair`（`{"url": 對方 issue 的網址, "relation": depends_on|blocks|parallel}`）
+指向另一個 repo 的 issue。`list`／`status` 會即時查對方的狀態（`pair`），以及這個 issue 要不要等對方（`waiting`）。
+`depends_on` 的上游要「PR 已 merge，而且 merge commit 已經在上游的 base_branch」才算完成。
+
 輸出一行 JSON。`list` 會被 skill 動態注入，所以永遠 exit 0，問題寫在 `message`；其他指令失敗時 exit 1。
 """
 
@@ -38,6 +42,8 @@ STATUS_RE = re.compile(r"<!-- bombolt:status (\{.*?\}) -->", re.S)
 META_RE = re.compile(r"<!-- bombolt:meta (\{.*?\}) -->", re.S)
 COMMENT_ID_RE = re.compile(r"#issuecomment-(\d+)")
 PR_NUMBER_RE = re.compile(r"(?:/pull/|^#?)(\d+)/?$")
+PAIR_URL_RE = re.compile(r"github\.com/([^/]+/[^/]+)/issues/(\d+)")
+PAIR_RELATIONS = ("depends_on", "blocks", "parallel")
 
 STATE_LABEL = {
     "working": "🟡 實作中",
@@ -182,6 +188,86 @@ def evaluate(number: int, issue_state: str, status: Optional[Dict[str, Any]],
     if blocked_label:
         return {**res, "verdict": "blocked", "message": "卡在停工提問（有 `bombolt:blocked` label）。"}
     return {**res, "verdict": "free", "message": "沒有人在做，可以認領。"}
+
+
+# ---------------------------------------------------------------------------
+# 跨 repo 的配對：對方 issue 的狀態、這個 issue 要不要等它
+# ---------------------------------------------------------------------------
+
+def pair_status(repo: Path, pair: Dict[str, Any], me: Dict[str, str]) -> Dict[str, Any]:
+    """配對的另一個 repo 的 issue 現在怎樣；`depends_on` 的話，上游完成了沒（`satisfied`）。
+
+    每個 key 都一定有。格式不對或查不到時 verdict 是 unknown，不丟錯（`list` 被動態注入，不能失敗）。
+    Example: pair_status(repo, {"url": "https://github.com/acme/api/issues/12", "relation": "depends_on"}, me)
+    """
+    relation = pair.get("relation") if pair.get("relation") in PAIR_RELATIONS else None
+    url = str(pair.get("url") or "")
+    res: Dict[str, Any] = {
+        "url": url, "repo": None, "number": None, "relation": relation, "title": None, "base": None,
+        "verdict": "unknown", "message": "", "owner_text": "", "mine": False, "fixing": False,
+        "open_prs": [], "closed_prs": [], "merged_prs": [], "merged_pr": None, "satisfied": None, "in_base": None,
+    }
+    m = PAIR_URL_RE.search(url)
+    if not m or relation is None:
+        return {**res, "message": f"配對資料格式不對：url `{url}`、relation `{pair.get('relation')}`"}
+    slug, number = m.group(1), int(m.group(2))
+    res.update(repo=slug, number=number)
+    # 對方 repo 可能屬於另一個帳號、沒有權限、資料長得怪：一律當查不到，只影響這一筆
+    try:
+        # 1. 對方 issue 與它 branch 的 PR（用目前 repo 的帳號）
+        issue = gh_json(repo, ["issue", "view", str(number), "-R", slug, "--json",
+                               "number,title,state,body,labels,comments"]) or {}
+        meta = issue_meta(issue.get("body", ""))
+        status, _ = find_status(issue.get("comments", []))
+        branch = branch_of(number, meta, status)
+        prs = []
+        if branch:
+            prs = gh_json(repo, ["pr", "list", "-R", slug, "--head", branch, "--state", "all", "--json",
+                                 "number,state,url,headRefOid,author,mergeCommit", "--limit", "20"]) or []
+        labels = [l["name"] for l in issue.get("labels", [])]
+        ev = evaluate(number, issue.get("state", "OPEN"), status, prs, me,
+                      blocked_label="bombolt:blocked" in labels)
+        merged = sorted((p for p in prs if p.get("state") == "MERGED"), key=lambda p: p.get("number", 0))
+        base = meta.get("base") or None
+        res.update(title=issue.get("title"), base=base, verdict=ev["verdict"], message=ev["message"],
+                   owner_text=ev["owner_text"], mine=ev["mine"], fixing=ev["fixing"], open_prs=ev["open_prs"],
+                   closed_prs=ev["closed_prs"], merged_prs=ev["merged_prs"],
+                   merged_pr=merged[-1]["number"] if merged else None)
+        if relation != "depends_on":
+            return res
+
+        # 2. depends_on：上游的 merge commit 進了它的 base 才算完成（pr_base 跟 base_branch 不同時，merge 了不代表進了 base）
+        if not merged:
+            return {**res, "satisfied": False}
+        if not base:
+            return {**res, "satisfied": False,
+                    "message": res["message"] + "（對方 issue 沒有 bombolt:meta 的 base，無法確認有沒有進 base）"}
+        sha = (merged[-1].get("mergeCommit") or {}).get("oid")
+        if not sha:
+            raise GhError(f"PR #{res['merged_pr']} 查不到 merge commit")
+        compare = gh(repo, ["api", f"repos/{slug}/compare/{sha}...{base}", "--jq", ".status"]).strip()
+        in_base = compare in ("ahead", "identical")  # base 在 merge commit 之後（或剛好就是它）
+        note = "也已經進了" if in_base else "但還沒進"
+        return {**res, "in_base": in_base, "satisfied": in_base,
+                "message": f"PR #{res['merged_pr']} 已經 merge，{note} `{base}`。"}
+    except Exception as e:  # noqa: BLE001 — 見上面的註解：查不到就是 unknown
+        return {**res, "verdict": "unknown", "satisfied": None, "in_base": None,
+                "message": f"查不到 {slug}#{number}：{str(e)[:200]}"}
+
+
+def pair_waiting(pair: Optional[Dict[str, Any]]) -> bool:
+    """這個 issue 要不要先等配對的上游。格式壞到連關係都不知道時當成要等，交給人判斷。"""
+    if pair is None:
+        return False
+    return pair["relation"] is None or (pair["relation"] == "depends_on" and pair["satisfied"] is not True)
+
+
+def pair_of(repo: Path, meta: Dict[str, Any], me: Dict[str, str]) -> Optional[Dict[str, Any]]:
+    """meta 有 `pair` 才查（沒有配對的 issue 不多打任何 gh 呼叫）。"""
+    if meta.get("pair") is None:
+        return None
+    pair = meta["pair"]
+    return pair_status(repo, pair if isinstance(pair, dict) else {"url": str(pair)}, me)
 
 
 # ---------------------------------------------------------------------------
@@ -343,10 +429,12 @@ def cmd_list(args: argparse.Namespace) -> None:
     for i in issues:
         n = i["number"]
         status, _ = find_status(i.get("comments", []))
-        branch = branch_of(n, issue_meta(i.get("body", "")), status)
+        meta = issue_meta(i.get("body", ""))
+        branch = branch_of(n, meta, status)
         labels = [l["name"] for l in i.get("labels", [])]
         ev = evaluate(n, "OPEN", status, by_head.get(branch, []) if branch else [], me,
                       blocked_label="bombolt:blocked" in labels)
+        pair = pair_of(repo, meta, me)
         matches = [name for name in local_names if name.startswith(f"bb-{n}-")]
         result.append({
             "number": n,
@@ -362,6 +450,8 @@ def cmd_list(args: argparse.Namespace) -> None:
             "assigned": bool(i.get("assignees")),
             "blocked": "bombolt:blocked" in labels,
             "local_worktree": matches[0] if matches else None,
+            "pair": pair,
+            "waiting": pair_waiting(pair),
         })
     out(status="ok", issues=result)
 
@@ -372,18 +462,21 @@ def cmd_status(args: argparse.Namespace) -> None:
         issue = gh_json(repo, ["issue", "view", str(args.issue), "--json",
                                "number,title,url,state,body,labels,comments"]) or {}
         status, _ = find_status(issue.get("comments", []))
-        branch = branch_of(args.issue, issue_meta(issue.get("body", "")), status)
+        meta = issue_meta(issue.get("body", ""))
+        branch = branch_of(args.issue, meta, status)
         prs = prs_for_branch(repo, branch) if branch else []
     except GhError as e:
         out(status="error", message=str(e))
         sys.exit(1)
     labels = [l["name"] for l in issue.get("labels", [])]
-    ev = evaluate(args.issue, issue.get("state", "OPEN"), status, prs, bb_lib.owner_info(repo),
+    me = bb_lib.owner_info(repo)
+    ev = evaluate(args.issue, issue.get("state", "OPEN"), status, prs, me,
                   blocked_label="bombolt:blocked" in labels)
+    pair = pair_of(repo, meta, me)
     # 接手別人做到一半的 issue 時，遠端不能已經有同名的 branch（對方推過），否則最後 push 不上去
     remote = bb_lib.remote_tip(repo, branch) if branch else ""
     out(status="ok", issue=args.issue, title=issue.get("title", ""), branch=branch,
-        remote_branch=remote, **ev)
+        remote_branch=remote, pair=pair, waiting=pair_waiting(pair), **ev)
 
 
 def cmd_mark(args: argparse.Namespace) -> None:

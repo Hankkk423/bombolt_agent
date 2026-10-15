@@ -4,6 +4,7 @@
 用法：
   bb_snapshot.py create [--base <branch>]   → 印出 JSON {"path","base","sha"}
   bb_snapshot.py remove <path>
+  bb_snapshot.py locate --repo <owner/name>  → 本機哪裡有這個 repo 的主 checkout（跨 repo 規劃用，永遠 exit 0）
 
 為什麼不直接看主 checkout：使用者的主 checkout 可能停在別的 branch、或有沒 commit 的改動，
 規劃要以「remote 上最新的 base」為準。
@@ -70,6 +71,27 @@ def cmd_remove(args: argparse.Namespace) -> None:
     print(json.dumps({"removed": str(target)}, ensure_ascii=False))
 
 
+def cmd_locate(args: argparse.Namespace) -> None:
+    """從 ~/.claude.json 記的專案裡，找 origin 是 `owner/name` 的主 checkout。"""
+    wanted = args.repo.strip().lower()
+    found = []
+    for project in bb_lib.claude_projects():
+        repo = bb_lib.main_checkout(project) if Path(project).is_dir() else None
+        if repo is None or str(repo) in found:
+            continue
+        p = subprocess.run(["git", "remote", "get-url", "origin"], cwd=str(repo), capture_output=True, text=True)
+        if p.returncode == 0 and bb_lib.repo_slug(p.stdout) == wanted:
+            found.append(str(repo))
+    if len(found) == 1:
+        out = {"status": "found", "path": found[0]}
+    elif found:
+        out = {"status": "multiple", "paths": sorted(found)}
+    else:
+        out = {"status": "not_found",
+               "message": f"Claude Code 開過的專案裡沒有 origin 是 {args.repo} 的 repo，請使用者提供主 checkout 的路徑。"}
+    print(json.dumps(out, ensure_ascii=False))
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -79,6 +101,9 @@ def main() -> None:
     r = sub.add_parser("remove")
     r.add_argument("path")
     r.set_defaults(func=cmd_remove)
+    loc = sub.add_parser("locate")
+    loc.add_argument("--repo", required=True, help="owner/name")
+    loc.set_defaults(func=cmd_locate)
     args = p.parse_args()
     args.func(args)
 
