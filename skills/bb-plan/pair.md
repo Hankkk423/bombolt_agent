@@ -54,7 +54,7 @@ bb-work 做下游時會先檢查上游進了 base_branch 沒；bb-list 會顯示
 ## 4. 兩份草稿
 
 - 兩份都照 [issue-template.md](issue-template.md)，各寫到自己的暫存檔，`{{repo}}`、`base`、DoD 的閘門各用自己 repo 的設定。
-  B 的 `{{repo}}` 在 B 裡取：`cd <B> && bb-gh repo view --json name -q .name`。
+  B 的 `{{repo}}` 在 B 裡取：`cd <B> && bb-gh repo view <owner/name> --json name -q .name`（`repo view` 用位置參數指定 repo）。
 - 兩份的「🔗 配對 issue」寫**同一段**介面契約，加上關係與 merge 順序。對方的網址先寫 `{{pair_url}}`。
 - meta 加 `"pair":{"url":"{{pair_url}}","relation":"<這份對對方的關係>"}`。兩份的關係要對得上：一份 `depends_on`、另一份就是 `blocks`；平行的兩份都是 `parallel`。
 - 「🚀 本地開始執行」各寫自己 repo 的主 checkout。下游那份加一句：上游的 PR 進了 base 再開工，或開工時選「依契約先開工」。

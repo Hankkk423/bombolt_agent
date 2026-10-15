@@ -194,11 +194,11 @@ def evaluate(number: int, issue_state: str, status: Optional[Dict[str, Any]],
 # 跨 repo 的配對：對方 issue 的狀態、這個 issue 要不要等它
 # ---------------------------------------------------------------------------
 
-def pair_status(repo: Path, pair: Dict[str, Any], me: Dict[str, str]) -> Dict[str, Any]:
+def pair_status(*, repo: Path, pair: Dict[str, Any], me: Dict[str, str]) -> Dict[str, Any]:
     """配對的另一個 repo 的 issue 現在怎樣；`depends_on` 的話，上游完成了沒（`satisfied`）。
 
     每個 key 都一定有。格式不對或查不到時 verdict 是 unknown，不丟錯（`list` 被動態注入，不能失敗）。
-    Example: pair_status(repo, {"url": "https://github.com/acme/api/issues/12", "relation": "depends_on"}, me)
+    Example: pair_status(repo=repo, pair={"url": "https://github.com/acme/api/issues/12", "relation": "depends_on"}, me=me)
     """
     relation = pair.get("relation") if pair.get("relation") in PAIR_RELATIONS else None
     url = str(pair.get("url") or "")
@@ -256,18 +256,24 @@ def pair_status(repo: Path, pair: Dict[str, Any], me: Dict[str, str]) -> Dict[st
 
 
 def pair_waiting(pair: Optional[Dict[str, Any]]) -> bool:
-    """這個 issue 要不要先等配對的上游。格式壞到連關係都不知道時當成要等，交給人判斷。"""
+    """這個 issue 要不要先等配對的上游。格式壞到連關係都不知道時當成要等，交給人判斷。
+
+    Example: pair_waiting({"relation": "depends_on", "satisfied": False}) is True
+    """
     if pair is None:
         return False
     return pair["relation"] is None or (pair["relation"] == "depends_on" and pair["satisfied"] is not True)
 
 
-def pair_of(repo: Path, meta: Dict[str, Any], me: Dict[str, str]) -> Optional[Dict[str, Any]]:
-    """meta 有 `pair` 才查（沒有配對的 issue 不多打任何 gh 呼叫）。"""
+def pair_of(*, repo: Path, meta: Dict[str, Any], me: Dict[str, str]) -> Optional[Dict[str, Any]]:
+    """meta 有 `pair` 才查（沒有配對的 issue 不多打任何 gh 呼叫）；沒有回 None。
+
+    Example: pair_of(repo=repo, meta=issue_meta(body), me=me)
+    """
     if meta.get("pair") is None:
         return None
     pair = meta["pair"]
-    return pair_status(repo, pair if isinstance(pair, dict) else {"url": str(pair)}, me)
+    return pair_status(repo=repo, pair=pair if isinstance(pair, dict) else {"url": str(pair)}, me=me)
 
 
 # ---------------------------------------------------------------------------
@@ -434,7 +440,7 @@ def cmd_list(args: argparse.Namespace) -> None:
         labels = [l["name"] for l in i.get("labels", [])]
         ev = evaluate(n, "OPEN", status, by_head.get(branch, []) if branch else [], me,
                       blocked_label="bombolt:blocked" in labels)
-        pair = pair_of(repo, meta, me)
+        pair = pair_of(repo=repo, meta=meta, me=me)
         matches = [name for name in local_names if name.startswith(f"bb-{n}-")]
         result.append({
             "number": n,
@@ -472,7 +478,7 @@ def cmd_status(args: argparse.Namespace) -> None:
     me = bb_lib.owner_info(repo)
     ev = evaluate(args.issue, issue.get("state", "OPEN"), status, prs, me,
                   blocked_label="bombolt:blocked" in labels)
-    pair = pair_of(repo, meta, me)
+    pair = pair_of(repo=repo, meta=meta, me=me)
     # 接手別人做到一半的 issue 時，遠端不能已經有同名的 branch（對方推過），否則最後 push 不上去
     remote = bb_lib.remote_tip(repo, branch) if branch else ""
     out(status="ok", issue=args.issue, title=issue.get("title", ""), branch=branch,

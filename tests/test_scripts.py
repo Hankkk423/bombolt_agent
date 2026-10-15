@@ -311,6 +311,14 @@ class TestSnapshot(RepoFixture):
     def test_locate_without_claude_json(self):
         self.assertEqual(self.locate("acme/api", None)["status"], "not_found")
 
+    def test_locate_skips_unreadable_projects(self):
+        locked = self.tmp / "locked"
+        (locked / "inner").mkdir(parents=True)
+        locked.chmod(0o000)
+        self.addCleanup(locked.chmod, 0o755)
+        api = self.plain_repo("api", "git@github.com:acme/api.git")
+        self.assertEqual(self.locate("acme/api", [locked / "inner", locked, api]), {"status": "found", "path": str(api)})
+
 
 class TestGuard(RepoFixture):
     def setUp(self):

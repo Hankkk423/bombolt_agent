@@ -77,6 +77,7 @@ def claude_projects() -> List[str]:
     """~/.claude.json 記的每個專案目錄（Claude Code 開過的資料夾）；讀不到回空清單。
 
     ⚠️ ~/.claude.json 不是官方文件記載的介面，格式可能改變；找不到時使用者可以自己給路徑。
+    Example: claude_projects() == ["/Users/me/work/api", "/Users/me/work/web"]
     """
     try:
         data = json.loads((Path.home() / ".claude.json").read_text(encoding="utf-8"))

@@ -76,10 +76,14 @@ def cmd_locate(args: argparse.Namespace) -> None:
     wanted = args.repo.strip().lower()
     found = []
     for project in bb_lib.claude_projects():
-        repo = bb_lib.main_checkout(project) if Path(project).is_dir() else None
-        if repo is None or str(repo) in found:
+        # 沒權限讀的目錄（別人的、macOS 保護的資料夾）跳過：一個讀不到不能讓其他的也找不到
+        try:
+            repo = bb_lib.main_checkout(project) if Path(project).is_dir() else None
+            if repo is None or str(repo) in found:
+                continue
+            p = subprocess.run(["git", "remote", "get-url", "origin"], cwd=str(repo), capture_output=True, text=True)
+        except OSError:
             continue
-        p = subprocess.run(["git", "remote", "get-url", "origin"], cwd=str(repo), capture_output=True, text=True)
         if p.returncode == 0 and bb_lib.repo_slug(p.stdout) == wanted:
             found.append(str(repo))
     if len(found) == 1:
