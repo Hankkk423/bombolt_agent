@@ -12,6 +12,7 @@
   4. 有還沒 push 的 commit
   5. 找不到對應的 PR，或 PR 還沒 merge（OPEN / CLOSED 都保留，交給人判斷）
   6. 本地 branch 的 HEAD 跟 PR merge 時的 head commit 不一樣（merge 之後又多了東西）
+     ——本地只是落後（HEAD 是 PR head 的祖先，本地的 commit 都已包含在 PR 裡）不算
   7. 查不到上面任何一項（gh 失敗、git 失敗）——查不到就當成「不能刪」
 
 判斷「merge 了沒」一律看 GitHub 的 PR 狀態，不用 `git branch --merged`：
@@ -201,6 +202,7 @@ def assess(repo: Path, wt: Dict[str, Any], sessions: List[Dict[str, Any]]) -> Di
         keep.append(f"讀不到 git status：{e}")
 
     pr_info: Dict[str, Any] = {}
+    behind = ""
     if branch:
         remote_ref = f"refs/remotes/origin/{branch}"
         has_remote = bb_lib.git_ok(["show-ref", "--verify", "--quiet", remote_ref], repo)
@@ -217,7 +219,11 @@ def assess(repo: Path, wt: Dict[str, Any], sessions: List[Dict[str, Any]]) -> Di
             keep.append(f"PR #{pr['number']} 狀態是 {pr['state']}，還沒 merge")
         else:
             if pr.get("headRefOid") and local_head and pr["headRefOid"] != local_head:
-                keep.append(f"本地 HEAD {local_head[:8]} 跟 PR merge 時的 head {pr['headRefOid'][:8]} 不同（merge 之後本地又有新 commit？）")
+                # 本地只是落後（別處推了 commit、這裡沒 pull）：本地有的都在 PR 裡，可以刪
+                if bb_lib.git_ok(["merge-base", "--is-ancestor", local_head, pr["headRefOid"]], repo):
+                    behind = f"本地 HEAD {local_head[:8]} 落後 PR merge 時的 head {pr['headRefOid'][:8]}（本地的 commit 都已包含在 PR 裡）"
+                else:
+                    keep.append(f"本地 HEAD {local_head[:8]} 跟 PR merge 時的 head {pr['headRefOid'][:8]} 不同（merge 之後本地又有新 commit？）")
 
         if has_remote and local_head:
             ahead = bb_lib.git(["rev-list", "--count", f"origin/{branch}..{local_head}"], repo, check=False)
@@ -229,7 +235,7 @@ def assess(repo: Path, wt: Dict[str, Any], sessions: List[Dict[str, Any]]) -> Di
     reasons = keep or ["PR 已 merge、工作目錄乾淨、沒有 session 在用（--apply 時會一併關閉對應的 issue）"]
     if not keep:
         info["remote"] = assess_remote(repo, branch, meta, pr_info.get("pr") or {})
-        reasons = reasons + [info["remote"]["reason"]]
+        reasons = reasons + ([behind] if behind else []) + [info["remote"]["reason"]]
     return {**info, "action": "keep" if keep else "remove", "reasons": reasons}
 
 
@@ -272,7 +278,7 @@ def remove(repo: Path, item: Dict[str, Any], keep_remote: bool = False) -> str:
     branch = item.get("branch")
     if branch:
         # squash merge 之後 `branch -d` 一定拒絕，所以用 -D；
-        # 安全性來自上面已經確認過「本地 HEAD == PR merge 時的 head」。
+        # 安全性來自上面已經確認過「本地 HEAD == PR merge 時的 head，或是它的祖先」。
         try:
             bb_lib.git(["branch", "-D", branch], repo)
             msg += f"與本地 branch `{branch}`"

@@ -726,6 +726,34 @@ class TestSweep(RepoFixture):
         self.assertFalse(r["bb-1-merged"].get("remote", {}).get("delete", False))
         self.assertTrue(self.remote_has(a["branch"]))
 
+    def test_local_behind_pr_head_removed_but_diverged_kept(self):
+        a, _, _ = self.work(1, "behind")
+        b, wt_b, _ = self.work(2, "diverged")
+        heads = {}
+        for info in (a, b):  # 別處在 PR 上又推了 commit，這裡沒 pull；PR 是用那個 head merge 的
+            other = self.tmp / f"other-{info['branch']}"
+            sh(["git", "clone", "-q", "-b", info["branch"], str(self.origin), str(other)], self.tmp)
+            sh(["git", "-c", "user.email=a@b", "-c", "user.name=a", "commit", "-q", "--allow-empty", "-m", "late"], other)
+            sh(["git", "push", "-q", "origin", info["branch"]], other)
+            heads[info["branch"]] = sh(["git", "rev-parse", "HEAD"], other).stdout.strip()
+        sh(["git", "commit", "-q", "--allow-empty", "-m", "local only"], wt_b)  # #2 本地另外有 PR 裡沒有的 commit
+        self.set_prs({**self.merged(a, heads[a["branch"]]), **self.merged(b, heads[b["branch"]], 2)})
+
+        r = self.sweep()
+        self.assertEqual(r["bb-1-behind"]["action"], "remove")
+        self.assertTrue(any("落後" in x for x in r["bb-1-behind"]["reasons"]))
+        self.assertTrue(r["bb-1-behind"]["remote"]["delete"])  # 遠端 tip == PR head，照原本規則判斷
+        self.assertEqual(r["bb-2-diverged"]["action"], "keep")
+        self.assertTrue(any("不同" in x for x in r["bb-2-diverged"]["reasons"]))
+
+        r = self.sweep("--apply")
+        self.assertFalse(Path(a["path"]).exists())
+        self.assertFalse(self.remote_has(a["branch"]))
+        self.assertTrue(Path(b["path"]).exists())
+        branches = sh(["git", "branch", "--list", "bb-*"], self.repo).stdout
+        self.assertNotIn(a["branch"], branches)
+        self.assertIn(b["branch"], branches)
+
     def test_lease_refuses_if_remote_moves_between_check_and_push(self):
         a, _, head = self.work(1, "merged")
         import bb_sweep  # noqa: E402
