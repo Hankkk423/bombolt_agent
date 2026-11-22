@@ -287,6 +287,11 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/bb_integrate.py" start --target <branch>
   （會從 PR 上的紀錄接著改，同事也可以；在這台電腦也可以 `claude --resume ${CLAUDE_SESSION_ID}` 回到這個對話，再跑 `/bombolt:bb-fix`）。
   想親手測：在這個 session 說「開 sandbox」，或在任何一台電腦的新 session 說「開 sandbox <issue 編號>」
   （在外面說「開外網 sandbox」，會給一個手機也能開的網址）。
+- 然後照 [bb-sandbox 的「測試方式提問」](../bb-sandbox/SKILL.md#測試方式提問) 問使用者要怎麼測。
+- **之後使用者在這個 session 要求修改**（改 code、改文件、照 review 改，沒有打 `/bombolt:bb-fix`）：讀 [bb-fix 的 SKILL.md](../bb-fix/SKILL.md)，
+  照「A. 修改這個 PR」從第 1 步做到第 7 步，跟使用者打了 `/bombolt:bb-fix <他說的話>` 一樣
+  （PR 編號用這個 issue 的；它開頭「現況」那一行指令自己跑一次；它裡面的 `${CLAUDE_PLUGIN_ROOT}`、`${CLAUDE_SESSION_ID}`
+  換成這個 skill 裡已經填好的路徑與 session id；第 5 步照它的分級驗收）。不要不經過它直接改了就 push。
 
 ---
 

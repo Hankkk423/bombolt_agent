@@ -218,11 +218,12 @@ claude -n bb-<repo>-<n>-<slug> --permission-mode auto "/bombolt:bb-work <n>"
 |---|---|
 | 「開 sandbox」 | 在 PR 的 worktree 照 `.claude/bombolt.md` 啟動 app，給你 `http://localhost:<port>` 和測試帳號，列出 PR「📋 人工測試」要你測的步驟 |
 | 「開外網 sandbox」 | 再用 ngrok 開一個臨時網址（每次一組新的帳密），在外面用手機也能測 |
+| 「AI 幫我測」 | 用一個看得到畫面的獨立瀏覽器（`playwright-cli --headed`，不碰你的 Chrome）照「要你測的」操作一遍，符合預期的在 PR 打勾並附證據；寄信、扣款、stage 類的留給你 |
 | 「第 3 步看到 500」 | 當場看 app 的 log 找原因；是 code 的問題就請你跑 `/bombolt:bb-fix` |
 | 「關掉 sandbox」 | 關掉 app 和 tunnel。session 結束也會自動關 |
 
-- 也可以直接打 `/bombolt:bb-sandbox`（外網：`/bombolt:bb-sandbox remote`）。在主 checkout 的 session 帶 issue 編號：`/bombolt:bb-sandbox 12`。
-- `bb-fix` 修完一輪也會問你要不要開 sandbox 測。
+- 也可以直接打 `/bombolt:bb-sandbox`（外網：`/bombolt:bb-sandbox remote`，AI 測：`/bombolt:bb-sandbox ai`）。在主 checkout 的 session 帶 issue 編號：`/bombolt:bb-sandbox 12`。
+- `bb-work` 發完 PR、`bb-fix` 修完一輪都會問你要怎麼測：AI 幫你測、開 sandbox 自己測（本機／外網），或先不用。
 - **在外面**：電腦保持開機、連網、不睡眠，用手機的 Claude app 透過 Remote Control 連回那台電腦上的 session，再說「開外網 sandbox」。
 - 外網一定帶帳密；直接執行 `ngrok`／`cloudflared` 會被安全守門擋下。ngrok 免費方案每個帳號只有一個固定網址，同時只能開一個外網 sandbox。
 - dev server 擋 tunnel 的網址（Vite、Next.js）、前端直接打 `http://localhost:<別的 port>` 這類專案自己的事，寫在 `.claude/bombolt.md` 的「Sandbox（外網測試）」一節（`bb-setup` 會問）。
@@ -243,6 +244,10 @@ claude -n bb-<repo>-<n>-<slug> --permission-mode auto "/bombolt:bb-fix <PR 編�
 - **需求調整**：review 時決定跟 issue 不一樣的地方（例如「預設改成下個月」）寫在 PR 內文的「📌 需求調整」，**issue 不會被改**：
   PR 砍掉重做時從原本的需求重來，並問你要沿用哪幾條調整。目標整個變了的話，它會建議你開新的 issue。
 - **以 code 為準**：有人沒用 bombolt、直接 push 的 commit，下一次接手時會補記、重新驗收；紀錄跟 code 對不上時相信 code。
+- **小修不必完整驗收**：重新驗收分四級，由腳本（`bb_pr.py scope`）比對上次驗收過的 commit 算出下限，AI 只能往上調、不能往下：
+  沒有新 commit 不用驗；只動文件（包括合進 base 時只有文件衝突）只跑閘門；程式檔最多 3 個、80 行只驗受影響的完成定義與測試步驟；
+  其他（需求調整、依賴或 CI、改到共用的呼叫端…）完整驗收。開始前會告訴你用哪一級、為什麼，說「完整驗收」就照完整跑。
+- **bb-work 之後在同一個 session 說「幫我改 X」**也會照 bb-fix 的流程做（分級驗收、更新 PR、留紀錄），不用另外打指令。
 - **有人正在改**：issue 的狀態會顯示「🟠 修改中」（誰、在哪台電腦）；另一個人再跑 bb-fix 會先問要不要繼續。
 - 在同一台電腦想接回原本的對話也可以：`claude --resume <PR 裡寫的 session id>`，再跑 `/bombolt:bb-fix`。
 
@@ -403,7 +408,7 @@ bombolt 所有的 GitHub 操作（開 issue、發 PR、留言、附圖）都經�
   （plugin 沒有釘版號，版本就是 commit SHA）；沒開的人照 [更新與移除](#更新與移除) 手動更新。
 - **開發 bombolt 本身時**，直接載入本機這份，改了立刻生效：`claude --plugin-dir ~/path/to/bombolt`
 - **改完之後量一次**：在這個 repo 說「跑 eval」或 `/bb-eval`。它會用固定的題目實際跑 bb-work／bb-fix（假的 GitHub、拋棄式 repo），
-  打分並跟 baseline 比，找出退步與原因。會花錢（全部約 US$25–40），細節見 [`evals/README.md`](evals/README.md)。
+  打分並跟 baseline 比，找出退步與原因。會花錢（全部約 US$30–45），細節見 [`evals/README.md`](evals/README.md)。
 - 結構：
 
   ```
@@ -419,6 +424,10 @@ bombolt 所有的 GitHub 操作（開 issue、發 PR、留言、附圖）都經�
   ```
 
 - 原則：**固定的步驟寫成腳本（可以測），只把判斷留給 LLM**。改腳本一定要補測試。
+- **試用中的設定：bb-fix 驗收分級的門檻**（2026-11-22 定）。第 2 級（只驗受影響的部分）的上限是**程式檔最多 3 個、加起來最多 80 行**，
+  超過就完整驗收。數字是先定來用用看的，寫在 `scripts/bb_pr.py` 的 `LIGHT_MAX_FILES`、`LIGHT_MAX_LINES`。
+  每次 bb-fix 用到分級時，都會把這兩個數字和判斷標準告訴當下的使用者。覺得太鬆（小修漏驗出問題）或太緊（明明是小修卻每次都完整驗收），
+  記下是哪個 PR、改了幾個檔幾行，累積幾次之後再調整。改的時候 `tests/test_scripts.py` 的 `TestVerifyScope` 要一起改。
 
 ## 已知限制
 

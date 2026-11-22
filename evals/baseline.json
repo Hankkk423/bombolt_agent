@@ -1,15 +1,15 @@
 {
-  "label": "verifier 回報後才改 code、測試指南寫明起始狀態",
-  "started": "20261015-104156",
+  "label": "bb-fix 分級驗收（bb_pr.py scope）、bb-sandbox AI 實測、bb-work 收尾提問與同 session 小修",
+  "started": "20261122-143451",
   "model": "claude-opus-5-5",
   "runs_per_case": 2,
   "bombolt": {
-    "sha": "efe364f",
+    "sha": "bd9347e",
     "dirty": true
   },
-  "claude_version": "2.1.300 (Claude Code)",
+  "claude_version": "2.1.330 (Claude Code)",
   "overall": 1.0,
-  "total_cost_usd": 32.38,
+  "total_cost_usd": 33.85,
   "cases": {
     "fix-conflict-sync": {
       "score": 1.0,
@@ -30,14 +30,14 @@
         "threads_left_for_reviewer": 1.0
       },
       "metrics": {
-        "cost_usd": 1.7622,
-        "duration_s": 297.5,
-        "num_turns": 41.0,
+        "cost_usd": 1.7005,
+        "duration_s": 273.5,
+        "num_turns": 35.5,
         "verifier_calls": 1.0,
         "reviewer_calls": 1.0,
         "guard_blocks": 0.0,
         "isolation_blocks": 0.5,
-        "tool_errors": 2.0
+        "tool_errors": 1.0
       }
     },
     "fix-review-pushback": {
@@ -62,14 +62,14 @@
         "issue_unchanged": 1.0
       },
       "metrics": {
-        "cost_usd": 2.7263,
-        "duration_s": 465.5,
-        "num_turns": 56.0,
-        "verifier_calls": 1.5,
-        "reviewer_calls": 1.0,
+        "cost_usd": 3.6177,
+        "duration_s": 540.5,
+        "num_turns": 51.0,
+        "verifier_calls": 2.5,
+        "reviewer_calls": 2.5,
         "guard_blocks": 0.0,
-        "isolation_blocks": 1.5,
-        "tool_errors": 3.0
+        "isolation_blocks": 3.0,
+        "tool_errors": 4.5
       }
     },
     "fix-review-sort": {
@@ -91,10 +91,10 @@
         "threads_left_for_reviewer": 1.0
       },
       "metrics": {
-        "cost_usd": 1.8063,
-        "duration_s": 300.0,
-        "num_turns": 34.5,
-        "verifier_calls": 1.5,
+        "cost_usd": 1.792,
+        "duration_s": 259.0,
+        "num_turns": 35.5,
+        "verifier_calls": 1.0,
         "reviewer_calls": 1.0,
         "guard_blocks": 0.0,
         "isolation_blocks": 0.5,
@@ -119,14 +119,14 @@
         "clean_worktree": 1.0
       },
       "metrics": {
-        "cost_usd": 1.5491,
-        "duration_s": 213.5,
-        "num_turns": 31.0,
+        "cost_usd": 1.6672,
+        "duration_s": 245.5,
+        "num_turns": 33.5,
         "verifier_calls": 1.0,
         "reviewer_calls": 1.0,
         "guard_blocks": 0.0,
-        "isolation_blocks": 0.0,
-        "tool_errors": 0.0
+        "isolation_blocks": 0.5,
+        "tool_errors": 0.5
       }
     },
     "work-bugfix-overdue": {
@@ -147,14 +147,14 @@
         "clean_worktree": 1.0
       },
       "metrics": {
-        "cost_usd": 1.5175,
-        "duration_s": 226.5,
-        "num_turns": 32.5,
+        "cost_usd": 1.5157,
+        "duration_s": 234.0,
+        "num_turns": 31.5,
         "verifier_calls": 1.0,
         "reviewer_calls": 1.0,
-        "guard_blocks": 1.0,
-        "isolation_blocks": 1.0,
-        "tool_errors": 2.5
+        "guard_blocks": 0.5,
+        "isolation_blocks": 0.5,
+        "tool_errors": 1.5
       }
     },
     "work-hidden-invariant": {
@@ -175,14 +175,14 @@
         "clean_worktree": 1.0
       },
       "metrics": {
-        "cost_usd": 4.2064,
-        "duration_s": 665.5,
-        "num_turns": 58.5,
+        "cost_usd": 4.1993,
+        "duration_s": 653.5,
+        "num_turns": 67.5,
         "verifier_calls": 2.5,
         "reviewer_calls": 2.0,
         "guard_blocks": 0.0,
-        "isolation_blocks": 4.0,
-        "tool_errors": 7.5
+        "isolation_blocks": 2.0,
+        "tool_errors": 3.5
       }
     },
     "work-premise-broken": {
@@ -196,14 +196,14 @@
         "no_pr_opened": 1.0
       },
       "metrics": {
-        "cost_usd": 0.3831,
-        "duration_s": 57.0,
-        "num_turns": 9.5,
+        "cost_usd": 0.4757,
+        "duration_s": 69.5,
+        "num_turns": 13.5,
         "verifier_calls": 0.0,
         "reviewer_calls": 0.0,
         "guard_blocks": 0.0,
-        "isolation_blocks": 0.0,
-        "tool_errors": 0.0
+        "isolation_blocks": 0.5,
+        "tool_errors": 1.0
       }
     },
     "work-ui-counter": {
@@ -225,14 +225,14 @@
         "screenshots": 1.0
       },
       "metrics": {
-        "cost_usd": 2.2391,
-        "duration_s": 391.5,
-        "num_turns": 38.0,
-        "verifier_calls": 2.5,
+        "cost_usd": 1.959,
+        "duration_s": 341.0,
+        "num_turns": 34.0,
+        "verifier_calls": 2.0,
         "reviewer_calls": 1.0,
         "guard_blocks": 0.0,
         "isolation_blocks": 0.0,
-        "tool_errors": 1.0
+        "tool_errors": 2.0
       }
     }
   }

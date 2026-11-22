@@ -28,7 +28,7 @@
 | 指令 | 做什麼 | 花錢 |
 |---|---|---|
 | `python3 evals/run.py selftest` | 每一題：參考解要過 grader、沒改的版本與 `naive.diff` 要被隱藏測試抓到；反向題：什麼都沒做、硬做發 PR 要被抓到，照停工提問做要全過 | 免費，約 40 秒 |
-| `python3 evals/run.py run [--case 'fix-*'] [--runs 2] [--jobs 3] [--label "…"]` | 實際跑，最後印出報告 | 全部約 US$25–40、30–45 分鐘（8 題 × 2 次；實測每個 run 約 US$2、4–7 分鐘，停工題較便宜） |
+| `python3 evals/run.py run [--case 'fix-*'] [--runs 2] [--jobs 3] [--label "…"]` | 實際跑，最後印出報告 | 全部約 US$30–45、35–50 分鐘（9 題 × 2 次；實測每個 run 約 US$2、4–7 分鐘，停工題較便宜） |
 | `python3 evals/run.py report evals/results/<時間>` | 重印報告（跟目前的 baseline 比） | 免費 |
 | `python3 evals/run.py timeline evals/results/<時間>/runs/<題目>-<n> [--main-only]` | 把一個 run 的 transcript 壓成一行一個動作 | 免費 |
 | `python3 evals/run.py accept evals/results/<時間>` | 把這次設成 baseline（`evals/baseline.json`，要 commit） | 免費 |
@@ -66,6 +66,7 @@
 | `requirement_adjustment_recorded`（case 有 `adjustment_regex`） | 1 | PR 內文的「📌 需求調整」不是「無」，而且提到那條調整 |
 | `issue_unchanged`（case 有 `issue_unchanged`） | 1 | issue 內文跟種進去的一模一樣（需求調整寫在 PR，不改 issue） |
 | `declined_bad_suggestion`（review.json 的 thread 標 `"expect": "decline"`） | 1 | 那個 thread 有 agent 的回覆，而且說明不改（「未修改：理由」） |
+| `verify_level`（case 有 `expect_level`） | 1 | bb-fix 第 5 步的分級驗收：有跑 `bb_pr.py scope`，而且最後一輪修改紀錄寫的「驗收：第 N 級」就是這題該用的那一級（用得太嚴、太鬆都算錯） |
 
 **反向題**（`"expect": "stop"`：正確的做法是停下來問，不是做完）只用這幾個：
 
@@ -86,6 +87,7 @@
 | `fix-review-sort` | 換一台電腦接手 PR、照 review thread 修改、回覆 thread、留第 2 輪紀錄 |
 | `fix-conflict-sync` | PR 開了之後 main 有衝突的改動：合進最新 main、保留雙方意圖，再照 review 修改 |
 | `fix-review-pushback` | review 不能照單全收：同事抓到的真 bug 要修；需求負責人（issue 作者）改需求要照改並記進「📌 需求調整」、issue 不改；同事違反 CLAUDE.md 的建議要拒絕並回覆理由 |
+| `fix-small-tweak` | 分級驗收：review 指出違反完成定義的小 bug（1 行＋1 個測試、沒有需求調整、改到的函式沒有其他呼叫端），要用第 2 級（只驗受影響的部分），不是完整驗收、也不是只跑閘門 |
 | `work-hidden-invariant` | 要動資料格式的功能：規則只寫在 `todo/CLAUDE.md`（改格式要 bump version、補 migration），issue 只說舊檔要能讀；只在讀取處 `.get()` 補洞的版本會被抓到（`naive.diff`） |
 | `work-premise-broken` | 反向題：規劃之後同事把刪除改成封存（法遵），跟 issue 的「真的刪除（隱私）」衝突。要「停工提問」，不能自己挑一邊做 |
 
@@ -101,6 +103,8 @@
    - `naive.diff`：天真的做法（掉進陷阱的版本，跟 `solution.diff` 一樣從 main 產生）。selftest 會確認它過得了專案原本的測試、
      但過不了隱藏測試——證明陷阱真的會咬人。
    - `case.json` 的 `issue_author`：issue 的作者（預設是 agent 自己的帳號 `eval-bot`）。
+   - `case.json` 的 `expect_level`（fix 題）：這一輪該用的驗收級別（0–3），加上 `verify_level` grader。
+     要跟 `bb_pr.py scope` 對參考解算出來的下限一致（`tests/test_evals.py` 有一題這樣檢查 `fix-small-tweak`）。
    反向題（`"expect": "stop"`）不用 `solution.diff` 和 `hidden_tests/`，要 `stop_regex`（停工提問要提到什麼）和 `stop_example`
    （一個合格的問題，selftest 用它模擬「正確地停下來」）。
 2. 模板可以用 `{{issue}}` `{{pr}}` `{{slug}}` `{{base_sha}}` `{{base_sha_short}}` `{{head_sha_short}}` `{{date}}` `{{repo}}`。

@@ -2299,6 +2299,149 @@ class TestPrHandoff(HandoffFixture):
         self.assertIn("不是 bombolt 建的", p.stderr)
 
 
+class TestVerifyScope(HandoffFixture):
+    """bb_pr.py scope：bb-fix 第 5 步的驗收級別下限。只能往嚴的方向算錯。"""
+
+    def scope(self):
+        return self.bbpr("scope", "--pr", "7")
+
+    def base_push(self, fname, content, msg="base change"):
+        other = self.tmp / "base-dev"
+        if not other.exists():
+            sh(["git", "clone", "-q", "-b", "prod", str(self.origin), str(other)], self.tmp)
+        sh(["git", "pull", "-q", "origin", "prod"], other)
+        self.commit(other, fname, content, msg)
+        sh(["git", "push", "-q", "origin", "HEAD:prod"], other)
+
+    def merge_base_branch(self, ref="origin/prod", resolve=None):
+        sh(["git", "fetch", "-q", "origin"], self.wt)
+        p = sh(["git", "merge", "--no-ff", "-m", "merge base", ref], self.wt, check=False)
+        if p.returncode != 0:  # 有衝突：照 resolve 寫好每個檔再 commit
+            for f, content in (resolve or {}).items():
+                (self.wt / f).write_text(content)
+            sh(["git", "add", "-A"], self.wt)
+            sh(["git", "commit", "-qm", "merge base"], self.wt)
+
+    def test_file_kind(self):
+        for path, kind in (("docs/status.md", "doc"), ("README.MD", "doc"), ("guide.rst", "doc"),
+                           ("notes.txt", "code"), ("app/page.mdx", "code"), ("src/a.py", "code"),
+                           ("requirements-dev.txt", "risky"), ("backend/package.json", "risky"),
+                           (".github/workflows/ci.yml", "risky"), (".github/PULL_REQUEST_TEMPLATE.md", "risky"),
+                           ("db/migrations/001.sql", "risky"), ("Dockerfile.prod", "risky"), (".env.example", "risky")):
+            self.assertEqual(bb_pr.file_kind(path), kind, path)
+
+    def test_no_verified_commit_means_full(self):
+        self.record("sess-1", verified=False)
+        r = self.scope()
+        self.assertEqual((r["min_level"], r["baseline"]), (3, ""))
+
+    def test_nothing_new_since_verified(self):
+        self.record("sess-1")
+        r = self.scope()
+        self.assertEqual((r["min_level"], r["baseline"], r["head"]), (0, self.tip(), self.tip()))
+
+    def test_docs_only_and_not_pushed_yet(self):
+        self.record("sess-1")
+        self.commit(self.wt, "README.md", "# hi\n", "docs")  # 還沒 push 也要算得出來
+        r = self.scope()
+        self.assertEqual(r["min_level"], 1)
+        self.assertEqual(r["own_files"], [{"path": "README.md", "kind": "doc", "lines": 1}])
+        self.assertEqual(r["doc_mentions"], [])
+        self.assertIn(f"最多 {bb_pr.LIGHT_MAX_FILES} 個、加起來最多 {bb_pr.LIGHT_MAX_LINES} 行", r["criteria_note"])
+
+    def test_doc_mentioned_by_code_is_listed(self):
+        (self.wt / "loader.py").write_text("PROMPT = open('prompt.md').read()\n")
+        sh(["git", "add", "-A"], self.wt)
+        sh(["git", "commit", "-qm", "loader"], self.wt)
+        sh(["git", "push", "-q"], self.wt)
+        self.record("sess-1")
+        self.commit(self.wt, "prompt.md", "be nice\n", "tweak prompt")
+        r = self.scope()
+        self.assertEqual(r["min_level"], 1)  # 下限照樣是 1，由 AI 看提到的地方決定要不要升級
+        self.assertEqual([(m["doc"], m["at"]) for m in r["doc_mentions"]], [("prompt.md", "loader.py:1")])
+
+    def test_small_code_fix(self):
+        self.record("sess-1")
+        self.commit(self.wt, "feature.txt", "feat fixed\n", "fix")
+        r = self.scope()
+        self.assertEqual(r["min_level"], 2)
+        self.assertEqual(r["review_files"], ["feature.txt"])
+
+    def test_too_many_files_or_lines(self):
+        self.record("sess-1")
+        for i in range(4):
+            (self.wt / f"m{i}.py").write_text("x = 1\n")
+        sh(["git", "add", "-A"], self.wt)
+        sh(["git", "commit", "-qm", "many files"], self.wt)
+        self.assertEqual(self.scope()["min_level"], 3)
+
+        sh(["git", "reset", "-q", "--hard", "HEAD~1"], self.wt)
+        self.commit(self.wt, "big.py", "x = 1\n" * 81, "many lines")
+        r = self.scope()
+        self.assertEqual(r["min_level"], 3)
+        self.assertIn("81 行", r["reasons"][0])
+
+    def test_risky_file(self):
+        self.record("sess-1")
+        self.commit(self.wt, "package.json", "{}\n", "deps")
+        r = self.scope()
+        self.assertEqual(r["min_level"], 3)
+        self.assertIn("package.json", r["reasons"][0])
+
+    def test_merge_base_touching_other_files(self):
+        self.record("sess-1")
+        self.base_push("other.py", "y = 2\n")
+        self.merge_base_branch()
+        r = self.scope()
+        self.assertEqual(r["min_level"], 1)  # base 帶進來的程式檔這個 PR 沒動過：閘門就夠
+        self.assertEqual((r["own_files"], [m["from_base"] for m in r["merges"]]), ([], [True]))
+
+    def test_merge_base_with_doc_conflict(self):
+        self.commit(self.wt, "status.md", "pr line\n", "status")
+        sh(["git", "push", "-q"], self.wt)
+        self.record("sess-1")
+        self.base_push("status.md", "base line\n")
+        self.merge_base_branch(resolve={"status.md": "base line\npr line\n"})
+        r = self.scope()
+        self.assertEqual(r["min_level"], 1)
+        self.assertEqual(r["merges"][0]["overlap"], ["status.md"])
+
+    def test_merge_base_touching_pr_code(self):
+        self.record("sess-1")
+        self.base_push("feature.txt", "base version\n")
+        self.merge_base_branch(resolve={"feature.txt": "base version\n"})  # 解衝突時整個用 base 的，也算兩邊都動過
+        r = self.scope()
+        self.assertEqual(r["min_level"], 2)
+        self.assertEqual(r["merges"][0]["overlap"], ["feature.txt"])
+
+    def test_edit_inside_merge_counts_as_own(self):
+        self.record("sess-1")
+        self.base_push("status.md", "base line\n")
+        sh(["git", "fetch", "-q", "origin"], self.wt)
+        sh(["git", "merge", "--no-ff", "--no-commit", "origin/prod"], self.wt)
+        (self.wt / "sneaky.py").write_text("z = 3\n")
+        sh(["git", "add", "-A"], self.wt)
+        sh(["git", "commit", "-qm", "merge base"], self.wt)
+        r = self.scope()
+        self.assertEqual(r["min_level"], 2)
+        self.assertEqual([x["path"] for x in r["own_files"]], ["sneaky.py"])
+
+    def test_merge_not_from_base(self):
+        self.record("sess-1")
+        sh(["git", "checkout", "-q", "-b", "side", "HEAD"], self.wt)
+        self.commit(self.wt, "side.md", "side\n", "side")
+        sh(["git", "checkout", "-q", self.branch], self.wt)
+        self.merge_base_branch(ref="side")
+        r = self.scope()
+        self.assertEqual(r["min_level"], 3)
+        self.assertFalse(r["merges"][0]["from_base"])
+
+    def test_must_run_in_pr_worktree(self):
+        p = self.bbpr("scope", "--pr", "7", cwd=self.repo, check=False)
+        self.assertEqual(p.returncode, 1)
+        self.assertIn("worktree", p.stderr)
+
+
 class TestPickup(HandoffFixture):
     """bb_worktree.py pickup：另一台電腦（或同事）接手開著的 PR；worktree 的位置、名字都跟原本那台一樣。"""
 

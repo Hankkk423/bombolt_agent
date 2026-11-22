@@ -334,6 +334,43 @@ class TestExtraGraders(unittest.TestCase):
         self.assertEqual((g["requirement_adjustment_recorded"], g["declined_bad_suggestion"], g["issue_unchanged"]),
                          (True, True, False))
 
+    def test_verify_level(self):
+        body = "🤖 **bombolt 紀錄 · 第 2 輪**\n\n**改了什麼**\n- 修未完成的算法（`abc1234`）\n- 驗收：第 2 級（改了 2 個程式檔、8 行）\n"
+        self.assertEqual(ev.verify_level(body, 1, 2), (True, "第 2 級"))
+        self.assertIn("應該是第 2 級", ev.verify_level(body.replace("第 2 級", "第 3 級"), 1, 2)[1])
+        self.assertTrue(ev.verify_level("驗收：**第 2 級**（理由）", 1, 2)[0])
+        self.assertIn("沒有跑", ev.verify_level(body, 0, 2)[1])
+        self.assertIn("沒寫", ev.verify_level("**改了什麼**\n- 修好了", 1, 2)[1])
+        self.assertFalse(ev.verify_level("<!-- 驗收：第 2 級 -->", 1, 2)[0], "註解裡的不算")
+
+    def test_scope_calls_metric(self):
+        cmd = 'python3 "/x/bombolt/scripts/bb_pr.py" scope --pr 102'
+        m = ev.transcript_metrics([ev_assistant("Bash", {"command": cmd}, tid="s1"),
+                                   ev_assistant("Bash", {"command": "python3 bb_pr.py context --pr 102"}, tid="s2")])
+        self.assertEqual(m["scope_calls"], 1)
+
+    def test_small_tweak_case_matches_scope_script(self):
+        """fix-small-tweak 的 expect_level 要跟腳本算出來的下限一致：照參考解修完，bb_pr.py scope 要回 2。"""
+        case = ev.load_case("fix-small-tweak")
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, str(tmp))
+        ctx = ev.prepare_workspace(case, tmp / "ws", 101)
+        ws = ev.Workspace(tmp / "ws")
+        scripts = ev.ROOT / "scripts"
+        p = ev.sh([sys.executable, str(scripts / "bb_worktree.py"), "pickup", "--pr", str(ctx["pr"]), "--session-id", "s"],
+                  ws.repo, env=ws.env)
+        wt = Path(json.loads(p.stdout)["path"])
+        ev.git(["apply", "-R", str(case["dir"] / "pr.diff")], wt, ws.env)
+        ev.git(["apply", str(case["dir"] / "solution.diff")], wt, ws.env)
+        ev.git(["commit", "-qam", "fix: count excludes done"], wt, ws.env)
+        p = ev.sh([sys.executable, str(scripts / "bb_pr.py"), "scope", "--pr", str(ctx["pr"])], wt, env=ws.env)
+        r = json.loads(p.stdout)
+        self.assertEqual(r["min_level"], case["expect_level"], r["reasons"])
+
+        done = {"result": {"subtype": "success", "is_error": False}}
+        g, _ = ev.grade_run(case, ws, ctx, done, {})
+        self.assertFalse(next(i for i in g.items if i["name"] == "verify_level")["pass"], "什麼都沒做不能過")
+
     def test_stop_grader_needs_the_real_question(self):
         """「實作暫停」的留言要提到前提為什麼不成立；只說暫停、問別的不算。"""
         case = ev.load_case("work-premise-broken")

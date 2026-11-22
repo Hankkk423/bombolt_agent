@@ -404,7 +404,8 @@ def transcript_metrics(events: List[Dict[str, Any]], skip_ids: frozenset = froze
     `-p` 模式下背景工作回來會讓主 session 再跑一段，所以會有好幾個 result：turns 要加總，成本取最後一個（累計值）。
     """
     m: Dict[str, Any] = {"tool_calls": 0, "tool_calls_main": 0, "tool_errors": 0, "guard_blocks": 0, "isolation_blocks": 0,
-                         "ask_user": 0, "subagents": {}, "tools": {}, "model": "", "result": {}, "subagent_runs": []}
+                         "ask_user": 0, "subagents": {}, "tools": {}, "model": "", "result": {}, "subagent_runs": [],
+                         "scope_calls": 0}
     guard_samples: List[str] = []
     started: Dict[str, str] = {}
     results: List[Dict[str, Any]] = []
@@ -433,6 +434,8 @@ def transcript_metrics(events: List[Dict[str, Any]], skip_ids: frozenset = froze
                     m["tool_calls_main"] += 1
                 if name == "AskUserQuestion":
                     m["ask_user"] += 1
+                if name == "Bash" and SCOPE_CALL_RE.search((c.get("input") or {}).get("command") or ""):
+                    m["scope_calls"] += 1
                 if name in AGENT_TOOLS:
                     sub = (c.get("input") or {}).get("subagent_type") or "general-purpose"
                     m["subagents"][sub] = m["subagents"].get(sub, 0) + 1
@@ -655,7 +658,7 @@ def grade_run(case: Dict[str, Any], ws: Workspace, ctx: Dict[str, Any], tm: Dict
         m = RECORD_RE.search(c.get("body") or "")
         if m:
             try:
-                recs.append(json.loads(m.group(1)))
+                recs.append({**json.loads(m.group(1)), "_body": c.get("body") or ""})
             except ValueError:
                 pass
     rounds = [r for r in recs if r.get("kind") == "round"]
@@ -699,6 +702,10 @@ def grade_run(case: Dict[str, Any], ws: Workspace, ctx: Dict[str, Any], tm: Dict
         now = hashlib.sha256((issue.get("body") or "").encode("utf-8")).hexdigest()
         g.add("issue_unchanged", now == ctx.get("issue_body_sha"), "" if now == ctx.get("issue_body_sha") else "issue 內文被改了")
 
+    if case.get("expect_level") is not None:
+        ok, detail = verify_level(last.get("_body", ""), tm.get("scope_calls", 0), case["expect_level"])
+        g.add("verify_level", ok, detail)
+
     if ctx.get("ui"):
         att = [Path(a.get("path", "")).name for a in (pr or {}).get("attachments", [])]
         before = [a for a in att if a.startswith("before")]
@@ -727,6 +734,22 @@ def adjustment_recorded(body: str, pattern: str) -> Tuple[bool, str]:
     if not re.search(pattern, text, re.I):
         return False, f"「📌 需求調整」沒提到 /{pattern}/：{text[:120]}"
     return True, text[:120].replace("\n", " ")
+
+
+LEVEL_RE = re.compile(r"驗收[：:]\s*\**\s*第\s*([0-3])\s*級")
+SCOPE_CALL_RE = re.compile(r"bb_pr\.py\S*\s+scope\b")
+
+
+def verify_level(record_body: str, scope_calls: int, expected: int) -> Tuple[bool, str]:
+    """bb-fix 第 5 步的分級驗收：有跑 `bb_pr.py scope`，而且最後一輪紀錄寫的級別就是這題該用的那一級。"""
+    if not scope_calls:
+        return False, "沒有跑 bb_pr.py scope"
+    found = LEVEL_RE.findall(re.sub(r"<!--.*?-->", "", record_body or "", flags=re.S))
+    if not found:
+        return False, "最後一輪的修改紀錄沒寫「驗收：第 N 級」"
+    if int(found[-1]) != expected:
+        return False, f"用了第 {found[-1]} 級，這題應該是第 {expected} 級"
+    return True, f"第 {expected} 級"
 
 
 def _expected_declines(case: Dict[str, Any]) -> List[Dict[str, Any]]:

@@ -169,13 +169,68 @@ bb-gh pr view <PR 編號> --json body -q .body > <artifacts>/pr-body.md
 - 某一條你認為不該照改（會破壞 DoD、違反專案規則）→ 不要改，在回覆裡說明理由，留給使用者裁決。這也是一個決定，記進這一輪的紀錄。
 - 每處理一組就 commit。
 
-### 5. 重新驗收
+### 5. 重新驗收（分級）
 
+這一輪的改動都 commit 之後（還不用 push），先決定驗收的級別。小修不必每次都完整驗收，但**判斷錯了的代價是把壞掉的 code 標成驗收過**，
+所以級別照下面的規則決定，不憑感覺：
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/bb_pr.py" scope --pr <PR 編號>
+```
+
+它比對「最後一個驗收過的 commit」（`baseline`）到現在的 `HEAD`，回傳 `min_level`（下限）與 `reasons`（為什麼）。
+**級別只能是 `min_level` 或更高，不可以往下調。** 再逐條檢查下面的「升級條件」，符合任何一條就照它升級。
+
+| 級別 | 腳本的下限規則（`min_level`） | 要做什麼 |
+|---|---|---|
+| **0 不用驗收** | `HEAD` 就是 `baseline`（這一輪沒有新的 commit） | 不用驗收，直接第 6 步 |
+| **1 只跑閘門** | 這個 PR 自己的改動（`own_files`）全部是文件（`.md`、`.markdown`、`.rst`、`.adoc`），而且合進 base 時兩邊都改過的檔（`merges[].overlap`）也全部是文件 | 見下面「第 1 級」 |
+| **2 驗受影響的部分** | 有改到程式檔、或合進 base 時兩邊都改過程式檔，但程式檔最多 3 個、加起來最多 80 行，而且沒有依賴、建置、CI、migration 類的檔 | 見下面「第 2 級」 |
+| **3 完整驗收** | 其他所有情況：沒有驗收過的 commit 可以當基準、合進來的不是 base、改到依賴／建置／CI／migration、程式檔超過 3 個或 80 行 | 見下面「第 3 級」 |
+
+**升級條件**（腳本看不出來的，由你逐條檢查，符合就升級；判斷不了的那一條當成符合）：
+- **升到 3**：
+  - 這一輪有需求調整（「📌 需求調整」新增或改了一條）。
+  - 使用者要求完整驗收（在 session 裡說的，或 review 裡寫的）。
+  - `context` 的 `history_rewritten` 是 `true`。
+  - 這一輪改到的函式、元件、端點或設定值，在這個 PR 以外還有其他呼叫端（用 grep 找），而且那些呼叫端的行為不在這個 PR 的 DoD 與人工測試指南裡。
+  - 這一輪是在修「上一次第 1 或第 2 級驗收沒過」的問題。
+- **把那個文件當成程式檔，重新照上表算一次**：`doc_mentions` 列出程式檔裡提到這個文件檔名的地方。
+  逐筆打開看：程式在執行時會讀取、載入、include、import、打包或 glob 到這個文件（例如 prompt、模板、被讀進來的設定、文件網站的頁面）→ 它就不是純文件。
+  只是註解、說明文字、錯誤訊息裡提到它 → 照樣算文件。看不出來是哪一種 → 當成程式檔。
+- 腳本失敗（例如 fetch 失敗）→ 第 3 級。
+
+開始驗收之前告訴使用者（每一輪都要說，使用者可能是第一次碰到這個機制）：
+- 這一輪用第幾級、為什麼（`reasons` 加上你升級的理由）。
+- `criteria_note` 原文照貼：判斷標準與門檻是 bombolt 試用中的設定、寫在哪裡、覺得不合適要找誰。
+
+使用者說要完整驗收就改成第 3 級。
+
+**第 1 級（只跑閘門）**：
+1. 跑驗證閘門（`.claude/bombolt.md`），有紅燈先修（修了程式碼的話，重跑 `scope` 重新定級）。
+2. 這一輪的改動讓 PR 的 diff 變了（`own_files` 不是空的）→ 更新逐段改動（`<artifacts>/walkthrough.md`，下面的寫法照常）、`render` 到 `ok`，
+   再派 `bombolt:bb-reviewer` 只對照逐段改動一次（呼叫時說「只對照逐段改動」）。只是合進 base（`own_files` 是空的）就不用。
+3. 不派 verifier；人工測試指南不加 🔄（行為沒變），勾選框照樣全部重設成沒勾。
+
+**第 2 級（驗受影響的部分）**：
+1. 跑驗證閘門，有紅燈先修。
+2. 更新逐段改動與人工測試指南（下面的寫法照常）。指南裡「受影響的步驟」前面加 🔄。
+   **受影響的步驟**＝這兩種的聯集：操作時會執行到 `review_files` 裡任何一個程式檔的 DoD 與指南步驟；這一輪要修的問題本身（用它的重現步驟）。
+   某一步會不會執行到判斷不了 → 算受影響。
+3. 並行派兩個 subagent：
+   - `bombolt:bb-verifier`：照常給它所有路徑，另外說「只驗 DoD 第 a、b 條，只照指南的第 x、y 步做」（受影響的那些）。
+   - `bombolt:bb-reviewer`：照常給它所有路徑，另外說「只看這一輪的改動：`git diff <baseline> HEAD -- <review_files 的每一個檔>`」。
+4. 兩個都回報之後，照 bb-work 第 7 步的第 4、5 點處理（自己確認每一個 blocking 問題、修）。有任何一條沒過、或有確認過的 blocking 問題 → 修好之後，**下一輪一律第 3 級**。
+
+**第 3 級（完整驗收）**：
 跟 bb-work 的第 7 步完全一樣（閘門 → 更新逐段改動與人工測試指南 → 並行派 `bombolt:bb-verifier` 與 `bombolt:bb-reviewer` → 確認 → 修，最多 3 輪）。
 兩個都回報之後才改 code：verifier 驗到一半 code 變了，那一次就白驗了。
+
+**每一級都適用的**：
 派 verifier 和 reviewer 時多給 `<artifacts>/pr-body.md` 的路徑：它的「📌 需求調整」會改寫 issue 的某幾條完成定義。
 這個 session 開著 sandbox（`bombolt:bb-sandbox`）的話，派 verifier 之前先照它的第 5 步關掉：verifier 會用同一個 port 啟動 app。
-reviewer 要看的是**整個 PR 的 diff**（`git diff origin/<base>...HEAD`），不只這一輪的改動。
+第 3 級的 reviewer 要看的是**整個 PR 的 diff**（`git diff origin/<base>...HEAD`），不只這一輪的改動；第 2 級照上面只看這一輪。
+驗收之後又 commit（就算只動文件）：重跑 `scope` 重新定級、照那一級再驗一次。
 逐段改動（`<artifacts>/walkthrough.md`，寫法見 [bb-work 的 walkthrough.md](../bb-work/walkthrough.md)）也一樣要涵蓋整個 PR 的 diff。
 PR 已經存在，所以產生骨架時帶 `--pr-url <PR 網址>`，連結直接就是正確的。還沒有這個檔的舊 PR，這次補寫。
 寫完一樣跑 `render` 到 `ok`。
@@ -189,7 +244,8 @@ UI 有變的話，verifier 重拍 after 截圖（檔名加上輪次，例如 `af
 1. `git push`
 2. 改 `<artifacts>/pr-body.md`（第 1 步從 GitHub 讀回來的最新版，別人可能改過）：
    「📌 需求調整」寫進這一輪人決定的調整（沒有就維持原樣）；
-   「✅ 驗收結果」表格換成這一輪的結果，註明驗的是哪個 commit（`驗的是 <短 sha>`）；
+   「✅ 驗收結果」表格換成這一輪的結果，註明驗的是哪個 commit（`驗的是 <短 sha>`）與第幾級；
+   第 1、2 級沒有重驗的那幾條，保留原本的結果並在證據後面註明「沿用 `<baseline 短 sha>` 的結果」；
    **不要動「🔁 要修改的話」那一段**（`<!-- bombolt:handoff:start -->` 到 `end`），它由第 5 點的腳本產生。
    舊 PR 內文裡的「🔄 第 N 輪修改」表格保留原樣、不再新增，每一輪的細節改記在修改紀錄。
    「📝 程式碼改動範圍」：重新跑一次
@@ -212,17 +268,19 @@ UI 有變的話，verifier 重拍 after 截圖（檔名加上輪次，例如 `af
    python3 "${CLAUDE_PLUGIN_ROOT}/scripts/bb_pr.py" record --pr <PR 編號> --session-id ${CLAUDE_SESSION_ID} \
      --kind round --summary "<一句話>" --body-file <artifacts>/record.md [--verified]
    ```
-   `--verified`：這一輪 verifier 在剛 push 的這個 commit 上全部通過（交給人測的 ⚠️ 不算沒過）。沒過就不加。
+   `--verified`：這一輪照第 5 步定的級別驗收、在剛 push 的這個 commit 上全部通過（交給人測的 ⚠️ 不算沒過；第 0 級也算）。沒過就不加。
+   紀錄的「改了什麼」後面寫一行「驗收：第 N 級（<理由>）」，第 2 級再寫驗了哪幾條 DoD、指南的哪幾步。
 6. 狀態改回審查中：`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/bb_issues.py" mark --issue <issue> --event fixed --pr <PR 編號>`
 7. 更新 `<artifacts>/progress.md`。
 
 ### 7. 回報
 
 告訴使用者：這一輪改了什麼、驗收結果、有哪幾條沒照改以及理由、記進了哪些需求調整。worktree 與 session 繼續保留。
+驗收結果的第一行一定要寫「驗收：第 N 級（<理由>）」，下一行原文照貼第 5 步 `scope` 回傳的 `criteria_note`
+（第 5 步開始前說過也要再寫一次：使用者常常只看最後的回報）。
 之後要再改：在這個 session 繼續說，或在任何一台電腦執行 `/bombolt:bb-fix <PR 編號>`（會從 PR 上的紀錄接著改）。
 
-然後用 AskUserQuestion 問要不要開 sandbox 親手測這一輪（選項：「本機」／「外網（手機也能開）」／「先不用」）。
-要的話用 Skill 工具執行 `bombolt:bb-sandbox`（外網帶 `remote`）。
+上面的回報寫完、送出之後，才照 [bb-sandbox 的「測試方式提問」](../bb-sandbox/SKILL.md#測試方式提問) 問使用者要怎麼測這一輪（提問不能取代回報）。
 
 ---
 

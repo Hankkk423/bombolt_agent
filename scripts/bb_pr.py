@@ -17,6 +17,10 @@
       --verified：verifier 在這個 commit 上全部通過（交給人測的 ⚠️ 不算沒過）。
   bb_pr.py note --pr N --session-id S --text "..." [--summary "一句話"]
       不用改 code、但會影響之後怎麼改的決定。最新那則紀錄是這個 session 寫的就附加在它後面，否則新貼一則「備註」。
+  bb_pr.py scope --pr N
+      在 PR 的 worktree 裡執行（還沒 push 也可以）：從最後一個驗收過的 commit 到現在的 HEAD 改了什麼，
+      算出這一輪驗收級別的下限（min_level，見 bb-fix 第 5 步：0 不用驗、1 只跑閘門、2 驗受影響的部分、3 完整）。
+      只會往嚴的方向算：看不出來的一律算程式、算完整。
 
 輸出一行 JSON；失敗時 exit 1，stderr 說明原因。
 """
@@ -520,6 +524,149 @@ def cmd_note(args: argparse.Namespace) -> None:
     out(status="ok", url=url, appended=appended)
 
 
+# 驗收分級（bb-fix 第 5 步）：腳本只算看得出來的事實，算出下限；AI 只能往上調
+DOC_EXTS = (".md", ".markdown", ".rst", ".adoc")  # .txt、.mdx 不算：requirements.txt、robots.txt、MDX 頁面都會影響執行
+RISKY_NAMES = {
+    "package.json", "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "bun.lockb", "bun.lock",
+    "pyproject.toml", "poetry.lock", "uv.lock", "pipfile", "pipfile.lock", "setup.py", "setup.cfg",
+    "go.mod", "go.sum", "cargo.toml", "cargo.lock", "gemfile", "gemfile.lock", "composer.json", "composer.lock",
+    "makefile", "dockerfile",
+}
+RISKY_DIRS = {".github", "migrations", "migration", "migrate"}
+LIGHT_MAX_FILES = 3   # 第 2 級最多改幾個程式檔
+LIGHT_MAX_LINES = 80  # 第 2 級程式檔最多改幾行（新增＋刪除）
+MAX_MENTIONS = 5      # 每個文件最多列幾處被提到的位置
+
+
+def file_kind(path: str) -> str:
+    """doc（純文件）、risky（依賴、建置、CI、migration：一律完整驗收）、code（其他）。"""
+    parts = path.lower().split("/")
+    name = parts[-1]
+    if name in RISKY_NAMES or name.startswith(("requirements", "constraints", "dockerfile", "docker-compose", ".env")) \
+            or any(p in RISKY_DIRS for p in parts[:-1]):
+        return "risky"
+    return "doc" if name.endswith(DOC_EXTS) else "code"
+
+
+def _names(cwd: Path, a: str, b: str) -> List[str]:
+    return [x for x in bb_lib.git(["diff", "--no-renames", "--name-only", a, b], cwd, check=False).splitlines() if x]
+
+
+def _numstat(cwd: Path, a: str, b: str) -> Dict[str, int]:
+    """每個檔改了幾行（新增＋刪除）；二進位檔算 0（它一定不是文件，照樣算程式檔）。"""
+    lines: Dict[str, int] = {}
+    for row in bb_lib.git(["diff", "--no-renames", "--numstat", a, b], cwd, check=False).splitlines():
+        cols = row.split("\t")
+        if len(cols) == 3:
+            lines[cols[2]] = sum(int(x) for x in cols[:2] if x.isdigit())
+    return lines
+
+
+def doc_mentions(cwd: Path, path: str) -> List[Dict[str, str]]:
+    """非文件的檔案裡，哪裡提到這個文件的檔名：可能是程式在執行時讀它（那它就不是純文件），要 AI 逐一判斷。"""
+    name = path.split("/")[-1]
+    text = bb_lib.git(["grep", "-n", "-I", "-F", "-e", name, "--", ".", *(f":(exclude)*{e}" for e in DOC_EXTS)],
+                      cwd, check=False)  # 一處都沒有時 exit 1
+    found = []
+    for row in text.splitlines()[:MAX_MENTIONS]:
+        where, _, text = row.partition(":")
+        num, _, text = text.partition(":")
+        found.append({"doc": path, "at": f"{where}:{num}", "text": text.strip()[:160]})
+    return found
+
+
+CRITERIA_NOTE = (f"驗收分級（bombolt 試用中的設定）：沒有新 commit 不用驗；只動文件只跑閘門；"
+                 f"程式檔最多 {LIGHT_MAX_FILES} 個、加起來最多 {LIGHT_MAX_LINES} 行只驗受影響的部分；"
+                 f"其他（含依賴、建置、CI、migration）完整驗收。AI 只能往嚴的方向調，你說「完整驗收」就照完整跑。"
+                 f"門檻寫在 bombolt 的 scripts/bb_pr.py（LIGHT_MAX_FILES、LIGHT_MAX_LINES），覺得太鬆或太緊請告訴 bombolt 的維護者。")
+
+
+def scope(wt: Path, recs: List[Dict[str, Any]], bases: List[str]) -> Dict[str, Any]:
+    """從最後一個驗收過的 commit 到 HEAD：這個 PR 自己改的檔、合進 base 時兩邊都動過的檔、驗收級別的下限。"""
+    head = bb_lib.git(["rev-parse", "HEAD"], wt)
+    baseline = next((r["to"] for r in reversed(recs)
+                     if r.get("verified") and has_commit(wt, r.get("to", "")) and is_ancestor(wt, r["to"], head)), "")
+    res: Dict[str, Any] = {"head": head, "baseline": baseline, "own_files": [], "merges": [],
+                           "doc_mentions": [], "review_files": []}
+    if not baseline:
+        return {**res, "min_level": 3, "reasons": ["沒有驗收過、而且還在這條 branch 上的 commit 可以當基準"]}
+    if baseline == head:
+        return {**res, "min_level": 0, "reasons": [f"HEAD 就是驗收過的 `{short(head)}`，這一輪沒有新的 commit"]}
+
+    own: Dict[str, int] = {}
+    for c in bb_lib.git(["rev-list", "--first-parent", "--no-merges", f"{baseline}..{head}"], wt).split():
+        for f, n in _numstat(wt, f"{c}^", c).items():
+            own[f] = own.get(f, 0) + n
+    reasons: List[str] = []
+    level = 1
+    overlap_all: Dict[str, str] = {}
+    for m in bb_lib.git(["rev-list", "--first-parent", "--merges", f"{baseline}..{head}"], wt).split():
+        parents = bb_lib.git(["rev-list", "--parents", "-n", "1", m], wt).split()[1:]
+        from_base = len(parents) == 2 and any(is_ancestor(wt, parents[1], f"origin/{b}") for b in bases)
+        info: Dict[str, Any] = {"sha": m, "from_base": from_base, "overlap": []}
+        res["merges"].append(info)
+        if not from_base:
+            level = 3
+            reasons.append(f"`{short(m)}` 不是合進 {'／'.join(f'origin/{b}' for b in bases)} 的 merge")
+            continue
+        ours_side, theirs_side = parents
+        mb = bb_lib.git(["merge-base", ours_side, theirs_side], wt, check=False).strip()
+        theirs = set(_names(wt, mb, theirs_side))
+        # 兩邊都動過的檔（自動合併或解過衝突，包括解衝突時丟掉了 base 的改動）
+        info["overlap"] = sorted(theirs & set(_names(wt, mb, ours_side)))
+        for f in info["overlap"]:
+            overlap_all[f] = file_kind(f)
+        # 合併時另外改的（base 沒動、結果卻跟這邊不一樣）：算成這個 PR 自己的改動
+        for f, n in _numstat(wt, ours_side, m).items():
+            if f not in theirs:
+                own[f] = own.get(f, 0) + n
+
+    res["own_files"] = [{"path": f, "kind": file_kind(f), "lines": n} for f, n in sorted(own.items())]
+    code = [x for x in res["own_files"] if x["kind"] != "doc"]
+    risky = sorted({x["path"] for x in code if x["kind"] == "risky"} |
+                   {f for f, k in overlap_all.items() if k == "risky"})
+    overlap_code = sorted(f for f, k in overlap_all.items() if k != "doc")
+    if risky:
+        level = 3
+        reasons.append(f"改到依賴、建置、CI 或 migration：{', '.join(risky)}")
+    lines = sum(x["lines"] for x in code)
+    if len(code) > LIGHT_MAX_FILES or lines > LIGHT_MAX_LINES:
+        level = 3
+        reasons.append(f"這一輪改了 {len(code)} 個程式檔、{lines} 行（第 2 級最多 {LIGHT_MAX_FILES} 個檔、{LIGHT_MAX_LINES} 行）")
+    if level < 3 and (code or overlap_code):
+        level = 2
+        if code:
+            reasons.append(f"這一輪改了程式檔：{', '.join(x['path'] for x in code)}")
+        if overlap_code:
+            reasons.append(f"合進 base 時兩邊都改過的程式檔：{', '.join(overlap_code)}")
+    if level == 1:
+        reasons.append("這一輪只動了文件；合進 base 時兩邊都改過的也只有文件")
+    docs = sorted({x["path"] for x in res["own_files"] if x["kind"] == "doc"} |
+                  {f for f, k in overlap_all.items() if k == "doc"})
+    for d in docs:
+        res["doc_mentions"] += doc_mentions(wt, d)
+    res["review_files"] = sorted({x["path"] for x in res["own_files"]} | set(overlap_all))
+    return {**res, "min_level": level, "reasons": reasons}
+
+
+def cmd_scope(args: argparse.Namespace) -> None:
+    repo = repo_or_fail()
+    wt = Path.cwd()
+    try:
+        pr = resolve(repo, args.pr)
+    except GhError as e:
+        fail(str(e))
+    branch = bb_lib.git(["rev-parse", "--abbrev-ref", "HEAD"], wt, check=False).strip()
+    if branch != pr["headRefName"]:
+        fail(f"要在 PR 的 worktree（branch `{pr['headRefName']}`）裡執行，目前在 `{branch or '?'}`。")
+    cfg = bb_lib.load_worktree_config(wt, repo) or {}
+    bases = sorted({b for b in (cfg.get("base_branch", ""), pr.get("baseRefName", "")) if b})
+    if not fetch(repo, *bases):
+        fail(f"fetch {', '.join(bases)} 失敗，沒辦法判斷合進來的是不是 base：先查清楚網路或登入。")
+    res = scope(wt, parse_records(pr.get("comments")), bases)
+    out(status="ok", **res, criteria_note=CRITERIA_NOTE)
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -541,6 +688,9 @@ def main() -> None:
     n.add_argument("--text", required=True)
     n.add_argument("--summary", default="")
     n.set_defaults(func=cmd_note)
+    s = sub.add_parser("scope")
+    s.add_argument("--pr", required=True, type=int, help="PR 或 issue 編號")
+    s.set_defaults(func=cmd_scope)
     args = p.parse_args()
     args.func(args)
 

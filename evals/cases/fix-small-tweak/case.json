@@ -1,0 +1,11 @@
+{
+  "kind": "fix",
+  "title": "feat(cli): 新增 count 指令，統計全部與未完成的待辦數量",
+  "slug": "cli-count",
+  "ui": false,
+  "description": "bb-fix 的分級驗收：review 指出一個違反完成定義的小 bug（未完成的數量把已完成的也算進去），修正只要改 1 行加 1 個測試，沒有需求調整、改到的函式沒有其他呼叫端。正確做法是跑 bb_pr.py scope、用第 2 級（只驗受影響的部分），不是第 3 級的完整驗收，也不是第 1 級只跑閘門；修好之後照常更新 PR、回覆 thread、留第 2 輪紀錄。",
+  "allowed_paths": ["todo/cli.py", "tests/*"],
+  "tags": ["fix", "review", "verify-level"],
+  "pr_title": "feat(cli): 新增 count 指令，統計全部與未完成的待辦數量 (#{{issue}})",
+  "expect_level": 2
+}

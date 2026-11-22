@@ -1,0 +1,18 @@
+{
+  "threads": [
+    {
+      "path": "todo/cli.py",
+      "line": 45,
+      "author": "amy-reviewer",
+      "body": "這裡把已完成的也算進「未完成」了：完成定義第 2 條寫的是未完成＝`done` 是 false 的筆數。PR 裡的測試剛好兩筆都沒完成，所以沒抓到，順便補一個有已完成的測試。"
+    }
+  ],
+  "reviews": [
+    {
+      "author": "amy-reviewer",
+      "state": "CHANGES_REQUESTED",
+      "body": "其他都 OK，只有未完成的算法錯了，見 inline comment。"
+    }
+  ],
+  "comments": []
+}
